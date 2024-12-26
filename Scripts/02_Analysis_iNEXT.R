@@ -34,35 +34,35 @@ load("Rdata/Taxonomy_09.26.24.Rdata")
 # iNEXT curves -----------------------------------------------------------
 # >Prep data frame ---------------------------------------------------------
 #Remove species that weren't identified to species level
-BirdPCs <- BirdPCs %>% filter(Nombre_ayerbe %in% TaxDf2$Species_ayerbe) %>% 
+Bird_pcs <- Bird_pcs %>% filter(Nombre_ayerbe %in% Tax_df3$Species_ayerbe) %>% 
   #There are 6 rows in UBC data where # individuals wasn't recorded. We know there was at least 1 individual
   mutate(Numero_individuos = ifelse(is.na(Numero_individuos), 1, Numero_individuos))
 
 #Sum number of individuals by each species, and pivot data frame so spp is row & each column is a.. 
 #Point count
-birds_wide_pc <- BirdPCs %>% #pc = point count
-  group_by(ID_punto_muestreo_FINAL, Nombre_ayerbe) %>% 
+birds_wide_pc <- Bird_pcs %>% #pc = point count
+  group_by(Id_muestreo, Nombre_ayerbe) %>% 
   summarize(Numero_individuos = sum(Numero_individuos)) %>%
   #mutate(surveyNum = 1:n()) %>% 
-  pivot_wider(names_from = ID_punto_muestreo_FINAL,
+  pivot_wider(names_from = Id_muestreo,
               values_from = Numero_individuos, 
               values_fn = mean,
               values_fill = 0)
 
-#Each column is a farm X data base X year (ID_db_ano)
-birds_wide_farm <- BirdPCs %>%
-  mutate(ID_db_ano = paste(Id_gcs, Uniq_db, Ano_grp, sep = ".")) %>%
-  group_by(ID_db_ano, Nombre_ayerbe) %>% 
+#Each column is a farm X data base X year (Id_db_ano)
+birds_wide_farm <- Bird_pcs %>%
+  mutate(Id_db_ano = paste(Id_gcs, Uniq_db, Ano_grp, sep = ".")) %>%
+  group_by(Id_db_ano, Nombre_ayerbe) %>% 
   summarize(Numero_individuos = sum(Numero_individuos)) %>%
   #mutate(surveyNum = 1:n()) %>% 
-  pivot_wider(names_from = ID_db_ano,
+  pivot_wider(names_from = Id_db_ano,
               values_from = Numero_individuos, 
               values_fn = mean,
               values_fill = 0)
 
 #CHECK:: Should be 1 row per species
 nrow(birds_wide_farm)
-unique(BirdPCs$Nombre_ayerbe)
+unique(Bird_pcs$Nombre_ayerbe)
 
 #Turn tibble to a dataframe w/ rownames
 bw_df_pc <- birds_wide_pc %>% #birds wide data frame
@@ -71,10 +71,10 @@ bw_df_farm <- birds_wide_farm %>% #birds wide data frame
   column_to_rownames(var = "Nombre_ayerbe")
 
 #Generate number of habitats per farm ID X Uniq_db X Ano_grp
-Num.hab.df <- BirdPCs %>%
-  mutate(ID_db_ano = paste(Id_gcs, Uniq_db, Ano_grp, sep = ".")) %>%
+Num.hab.df <- Bird_pcs %>%
+  mutate(Id_db_ano = paste(Id_gcs, Uniq_db, Ano_grp, sep = ".")) %>%
   #Adding Uniq_db & Ecoregion don't change number of rows in resulting df 
-  group_by(ID_db_ano, Uniq_db) %>% #ADD ECOREGION HERE
+  group_by(Id_db_ano, Uniq_db) %>% #ADD ECOREGION HERE
   summarize(Num.hab = as.factor(length(unique(Habitat_homologado_ut)))) %>% 
   arrange(desc(Num.hab))
 
@@ -102,7 +102,7 @@ summary_df <- i4steps$summary[[2]]  %>%
   left_join(dfs_long[[2]], by = c("Assemblage", "Order.q")) %>% 
   full_join(dfs_long[[3]], by = c("Assemblage", "Order.q")) %>% 
   mutate(Evenness = ifelse(Order.q == "0", 1, Evenness)) %>% 
-  left_join(Num.hab.df, by = join_by("Assemblage" == "ID_db_ano")) %>% 
+  left_join(Num.hab.df, by = join_by("Assemblage" == "Id_db_ano")) %>% 
   mutate(Id_gcs = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,1],
          Uniq_db = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,2],
          Ano = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,3]) %>% 
@@ -119,8 +119,8 @@ i4_flat <- purrr::list_flatten(i4steps$details)
 #Add metadata for plotting
 i4_meta <- map(i4_flat, \(df){
   df %>% left_join(distinct(summary_df[,c("Assemblage", "Id_gcs", "Uniq_db", "Ano")])) %>% 
-    left_join(Num.hab.df[,c("ID_db_ano", "Num.hab")], 
-              by = join_by("Assemblage" == "ID_db_ano")) %>% 
+    left_join(Num.hab.df[,c("Id_db_ano", "Num.hab")], 
+              by = join_by("Assemblage" == "Id_db_ano")) %>% 
     relocate(Assemblage, Id_gcs, Uniq_db, Ano)
 })
 
@@ -204,7 +204,7 @@ ggplot(data = i4_meta$Evenness_E3,
 #Goal: Understand how database (‘Uniq_db’), ecoregion, and the number of habitats surveyed (‘Num.hab’) influence taxonomic diversity & evenness for q = 0 (non-asymptotic at Cmax), as well as q = 1 & 2 (asymptotic). These are important variables to consider when interpreting taxonomic diversity results & thinking of potential biases.
 
 df.a <- summary_df %>% filter(Id_gcs != 3133) %>% #Remove UBC farm with 2 forest points
-  left_join(distinct(BirdPCs, Id_gcs, Ecoregion))
+  left_join(distinct(Bird_pcs, Id_gcs, Ecoregion))
 summary(lm(No_Asy_TD ~ Num.hab + Ecoregion, data = filter(df.a, Order.q == 0)))
 summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = filter(df.a, Order.q == 1)))
 summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = filter(df.a, Order.q == 2)))
@@ -358,13 +358,13 @@ AsyEst3 %>% select(-Assemblage) %>%
 
 #EXTRA
 #Species richness by department plots
-BirdPCs %>% filter(Nombre_institucion == "GAICA") %>% 
+Bird_pcs %>% filter(Nombre_institucion == "GAICA") %>% 
   group_by(Departamento, Ano) %>% 
   summarize(Richness = length(unique(Nombre_ayerbe))) %>% 
   ggplot(aes(x = Departamento, y = Richness)) +
   geom_bar()
 
-BirdPCs %>%
+Bird_pcs %>%
   #filter(Nombre_institucion == "GAICA") %>%
   group_by(Departamento, Uniq_db) %>%
   summarize(Richness = length(unique(Nombre_ayerbe))) %>%
@@ -435,8 +435,8 @@ estimateD(bird,
 ## In Vegan we can create species accumulation curves based on the number of point counts on each farm. It seems like this is not necessary with the new iNEXT4steps framework, but Arturo recommended this at some point 
 #Create dataframe where Farm X PC X Datacollector are the rows#
 #Add or remove Ano_grp depending on Christina's preference
-srows <- BirdPCs %>% 
-  group_by(Id_gcs, Uniq_db, ID_punto_muestreo_FINAL, Ano_grp, Nombre_ayerbe) %>% 
+srows <- Bird_pcs %>% 
+  group_by(Id_gcs, Uniq_db, Id_muestreo, Ano_grp, Nombre_ayerbe) %>% 
   summarize(Numero_individuos = sum(Numero_individuos)) %>%
   #mutate(surveyNum = 1:n()) %>% 
   pivot_wider(names_from = Nombre_ayerbe,
@@ -454,7 +454,7 @@ names(srows_l) <- map_chr(srows_l, \(df){
 #Remove columns & create rownames
 srows_l <- map(srows_l, \(df){
   df %>% select(-c(Id_gcs, Uniq_db, Ano_grp)) %>% 
-    column_to_rownames(var = "ID_punto_muestreo_FINAL")
+    column_to_rownames(var = "Id_muestreo")
 })
 
 #Create species accumulation objects. Warning: the standard deviation is zero
