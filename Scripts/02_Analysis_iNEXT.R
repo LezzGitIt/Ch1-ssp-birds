@@ -36,16 +36,16 @@ load("Rdata/Taxonomy_09.26.24.Rdata")
 #Remove species that weren't identified to species level
 Bird_pcs <- Bird_pcs %>% filter(Nombre_ayerbe %in% Tax_df3$Species_ayerbe) %>% 
   #There are 6 rows in UBC data where # individuals wasn't recorded. We know there was at least 1 individual
-  mutate(Numero_individuos = ifelse(is.na(Numero_individuos), 1, Numero_individuos))
+  mutate(Count = ifelse(is.na(Count), 1, Count))
 
 #Sum number of individuals by each species, and pivot data frame so spp is row & each column is a.. 
 #Point count
 birds_wide_pc <- Bird_pcs %>% #pc = point count
   group_by(Id_muestreo, Nombre_ayerbe) %>% 
-  summarize(Numero_individuos = sum(Numero_individuos)) %>%
+  summarize(Count = sum(Count)) %>%
   #mutate(surveyNum = 1:n()) %>% 
   pivot_wider(names_from = Id_muestreo,
-              values_from = Numero_individuos, 
+              values_from = Count, 
               values_fn = mean,
               values_fill = 0)
 
@@ -53,10 +53,10 @@ birds_wide_pc <- Bird_pcs %>% #pc = point count
 birds_wide_farm <- Bird_pcs %>%
   mutate(Id_db_ano = paste(Id_gcs, Uniq_db, Ano_grp, sep = ".")) %>%
   group_by(Id_db_ano, Nombre_ayerbe) %>% 
-  summarize(Numero_individuos = sum(Numero_individuos)) %>%
+  summarize(Count = sum(Count)) %>%
   #mutate(surveyNum = 1:n()) %>% 
   pivot_wider(names_from = Id_db_ano,
-              values_from = Numero_individuos, 
+              values_from = Count, 
               values_fn = mean,
               values_fill = 0)
 
@@ -75,7 +75,7 @@ Num.hab.df <- Bird_pcs %>%
   mutate(Id_db_ano = paste(Id_gcs, Uniq_db, Ano_grp, sep = ".")) %>%
   #Adding Uniq_db & Ecoregion don't change number of rows in resulting df 
   group_by(Id_db_ano, Uniq_db) %>% #ADD ECOREGION HERE
-  summarize(Num.hab = as.factor(length(unique(Habitat_homologado_ut)))) %>% 
+  summarize(Num.hab = as.factor(length(unique(Habitat_ut)))) %>% 
   arrange(desc(Num.hab))
 
 tabyl(Num.hab.df, Uniq_db, Num.hab)
@@ -437,10 +437,10 @@ estimateD(bird,
 #Add or remove Ano_grp depending on Christina's preference
 srows <- Bird_pcs %>% 
   group_by(Id_gcs, Uniq_db, Id_muestreo, Ano_grp, Nombre_ayerbe) %>% 
-  summarize(Numero_individuos = sum(Numero_individuos)) %>%
+  summarize(Count = sum(Count)) %>%
   #mutate(surveyNum = 1:n()) %>% 
   pivot_wider(names_from = Nombre_ayerbe,
-              values_from = Numero_individuos, 
+              values_from = Count, 
               values_fn = mean,
               values_fill = 0)
 #Create list 

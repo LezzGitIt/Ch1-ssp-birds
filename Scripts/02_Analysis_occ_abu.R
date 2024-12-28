@@ -1,6 +1,8 @@
 ## PhD birds in silvopastoral landscapes##
 # Analysis occupancy modeling -- Occupancy modeling using packages unmarked, ubms, and spOccupancy
 
+# NOTES:: See Books/Applied hierarchical modeling notes Word doc for theory
+
 # Contents
 # 1)
 # 2)
@@ -98,7 +100,7 @@ PC_date <- Bird_pcs %>%
   mutate(surveyNum = 1:n()) # Add in time of day once standardized
 PC_date %>% count(Uniq_db)
 
-# Removed Habitat_homologado_ut b/c this was creating multiple rows for Distanciamiento points
+# Removed Habitat_ut b/c this was creating multiple rows for Distanciamiento points
 uniqPCs <- Bird_pcs %>%
   distinct(Id_muestreo, Fecha, Ano, Mes, Departamento, elev_fnExtract, Latitud_decimal, Longitud_decimal) %>%
   group_by(Id_muestreo) %>%
@@ -109,7 +111,7 @@ nrow(uniqPCs)
 manacus <- Bird_pcs %>%
   filter(Especie == "Manacus manacus") %>%
   group_by(Id_muestreo) %>%
-  mutate(count = sum(Numero_individuos)) %>%
+  mutate(count = sum(Count)) %>%
   distinct(Especie, Id_muestreo, count) %>%
   arrange(count)
 nrow(manacus) # Not sure why 10 rows are added when using summarize () over mutate()
