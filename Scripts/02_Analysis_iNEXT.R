@@ -1,10 +1,10 @@
-##PhD birds in silvopastoral landscapes##
-#Analysis iNEXT -- Runs through iNEXT (4 steps and original) analysis
-##This script creates various species accumulation curves to genearte comparable estimates of biodiversity across farms with different sampling efforts
+## PhD birds in silvopastoral landscapes##
+# Analysis iNEXT -- Runs through iNEXT (4 steps and original) analysis
+## This script creates various species accumulation curves to generate comparable estimates of biodiversity across farms with different sampling efforts
 
-#See associated documents in SNAPP -> Taxonomic diversity, as well as the associated Chao et al (2020) paper 
+# See associated documents in SNAPP -> Taxonomic diversity, as well as the associated Chao et al (2020) paper 
 
-##NOTE: Some point counts are sampled multiple times while others sampled once. For example, a GAICA farm & CIPAV farm each may have 4 point counts, but GAICA could have sampled each farm 4x while CIPAV 1x##
+## NOTE: Some point counts are sampled multiple times while others sampled once. For example, a GAICA farm & CIPAV farm each may have 4 point counts, but GAICA could have sampled each farm 4x while CIPAV only 1x##
 
 #Contents
 # 1) Prep data frame -- Sum the number of individuals by each species, and pivot data frame so spp is row & each column is a 1) point count or 2) farm X data base X year
@@ -26,43 +26,45 @@ ggplot2::theme_set(theme_cowplot())
 conflicts_prefer(dplyr::select)
 conflicts_prefer(dplyr::filter)
 
-load("Rdata/the_basics_09.25.24.Rdata")
-load("Rdata/Taxonomy_09.26.24.Rdata")
+load("Rdata/the_basics_02.27.25.Rdata")
+#load("Rdata/Taxonomy_09.26.24.Rdata")
+source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
 
-#vignette(topic = "Introduction", package = "iNEXT")
+Birds_analysis <- read_excel(path = "Derived/Excels/Birds_analysis.xlsx")
+
+# vignette(topic = "Introduction", package = "iNEXT")
+#NOTE:: The unique row identifier  [e.g. ID x Year] is critical , this defines what a row is in your dataframes and how many rows each dataframe will have 
+Row_id_inext <- c( "Uniq_db", "Id_gcs", "Ano_grp")
 
 # iNEXT curves -----------------------------------------------------------
-# >Prep data frame ---------------------------------------------------------
-#Remove species that weren't identified to species level
-Bird_pcs <- Bird_pcs %>% filter(Nombre_ayerbe %in% Tax_df3$Species_ayerbe) %>% 
-  #There are 6 rows in UBC data where # individuals wasn't recorded. We know there was at least 1 individual
-  mutate(Count = ifelse(is.na(Count), 1, Count))
+# Prep data frames ---------------------------------------------------------
+## Sum number of individuals by each species, and pivot data frame so spp is row & each column is a.. 
+pivot_wider_inext <- function(row_id, level.farm = FALSE){
+  if(level.farm){
+    Birds_analysis <- Birds_analysis %>% filter(!is.na(Id_gcs))
+  }
+  Birds_analysis %>%
+    mutate(Identifier = pmap_chr(
+      across(all_of(row_id)), ~ paste(..., sep = ".")
+    )) %>%
+    summarize(Count = sum(Count), .by = c(Identifier, Nombre_ayerbe)) %>%
+    #mutate(surveyNum = 1:n()) %>% 
+    pivot_wider(names_from = Identifier,
+                values_from = Count, 
+                values_fn = mean,
+                values_fill = 0)
+}
+# Each column is a farm X data base X year (Id_db_ano)
+birds_wide_farm <- pivot_wider_inext(
+  row_id = Row_id_inext, level.farm = TRUE
+  ) %>% rename_with(~ str_replace_all(., pattern = " |-", replacement = "_")) 
 
-#Sum number of individuals by each species, and pivot data frame so spp is row & each column is a.. 
-#Point count
-birds_wide_pc <- Bird_pcs %>% #pc = point count
-  group_by(Id_muestreo, Nombre_ayerbe) %>% 
-  summarize(Count = sum(Count)) %>%
-  #mutate(surveyNum = 1:n()) %>% 
-  pivot_wider(names_from = Id_muestreo,
-              values_from = Count, 
-              values_fn = mean,
-              values_fill = 0)
-
-#Each column is a farm X data base X year (Id_db_ano)
-birds_wide_farm <- Bird_pcs %>%
-  mutate(Id_db_ano = paste(Id_gcs, Uniq_db, Ano_grp, sep = ".")) %>%
-  group_by(Id_db_ano, Nombre_ayerbe) %>% 
-  summarize(Count = sum(Count)) %>%
-  #mutate(surveyNum = 1:n()) %>% 
-  pivot_wider(names_from = Id_db_ano,
-              values_from = Count, 
-              values_fn = mean,
-              values_fill = 0)
+# Each column is a point count
+birds_wide_pc <- pivot_wider_inext(row_id = "Id_muestreo")
 
 #CHECK:: Should be 1 row per species
 nrow(birds_wide_farm)
-unique(Bird_pcs$Nombre_ayerbe)
+length(unique(Birds_analysis$Nombre_ayerbe)) # 12 species observed in Otun Quimbaya
 
 #Turn tibble to a dataframe w/ rownames
 bw_df_pc <- birds_wide_pc %>% #birds wide data frame
@@ -70,18 +72,37 @@ bw_df_pc <- birds_wide_pc %>% #birds wide data frame
 bw_df_farm <- birds_wide_farm %>% #birds wide data frame
   column_to_rownames(var = "Nombre_ayerbe")
 
+# Num.hab.df --------------------------------------------------------------
 #Generate number of habitats per farm ID X Uniq_db X Ano_grp
-Num.hab.df <- Bird_pcs %>%
-  mutate(Id_db_ano = paste(Id_gcs, Uniq_db, Ano_grp, sep = ".")) %>%
+# WE NEED ANO_GRP?
+
+Pc_hab %>% count(Id_muestreo, sort = T)
+Pc_hab %>% filter(Id_muestreo == "G-AD-M-CO_03") %>% 
+  select(Habitat_ut, Habitat_cons)
+
+# Generate tbl with the number of habitats surveyed on each farm
+date_join <- Pc_date8[,c("Id_muestreo", "Uniq_db", "Ano_grp")] %>% distinct()
+Num.hab.df <- Pc_hab %>%
+  distinct(Id_gcs, Uniq_db, Id_muestreo, Habitat_cons) %>%
+  left_join(date_join) %>%
+  filter(!is.na(Id_gcs)) %>%
+  mutate(Identifier = pmap_chr(
+    across(all_of(Row_id_inext)), ~ paste(..., sep = ".")
+  )) %>%
   #Adding Uniq_db & Ecoregion don't change number of rows in resulting df 
-  group_by(Id_db_ano, Uniq_db) %>% #ADD ECOREGION HERE
-  summarize(Num.hab = as.factor(length(unique(Habitat_ut)))) %>% 
-  arrange(desc(Num.hab))
+  #group_by(Identifier, Uniq_db) %>% #ADD ECOREGION HERE
+  summarize(Num.hab = as.factor(length(unique(Habitat_cons))), 
+            .by = Identifier) %>% 
+  arrange(desc(Num.hab)) %>% 
+  mutate(Identifier = str_replace_all(
+    Identifier, pattern = " |-", replacement = "_")
+    ) 
 
 tabyl(Num.hab.df, Uniq_db, Num.hab)
 
-# >iNEXT4steps ------------------------------------------------------------
+# iNEXT4steps ------------------------------------------------------------
 i4steps <- iNEXT4steps(data = bw_df_farm, nboot = 0, details = TRUE) #TD = Taxonomic diversity
+warnings()
 
 #Name "Assemblage' column, pivot_longer so Order.q is a single column. This permits joining with i4steps$summary[[2]] in next step
 values_to <- c("SC_obs", "No_Asy_TD", "Evenness") #No_Asy_TD = Non asymptotic estimate of taxonomic div
@@ -102,9 +123,9 @@ summary_df <- i4steps$summary[[2]]  %>%
   left_join(dfs_long[[2]], by = c("Assemblage", "Order.q")) %>% 
   full_join(dfs_long[[3]], by = c("Assemblage", "Order.q")) %>% 
   mutate(Evenness = ifelse(Order.q == "0", 1, Evenness)) %>% 
-  left_join(Num.hab.df, by = join_by("Assemblage" == "Id_db_ano")) %>% 
-  mutate(Id_gcs = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,1],
-         Uniq_db = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,2],
+  left_join(Num.hab.df, by = join_by("Assemblage" == "Identifier")) %>%
+  mutate(Uniq_db = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,1],
+         Id_gcs = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,2],
          Ano = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,3]) %>% 
   relocate(c(Uniq_db, Id_gcs, Ano), .before = Assemblage) %>% 
   relocate(Order.q, .after = qTD)
@@ -119,23 +140,24 @@ i4_flat <- purrr::list_flatten(i4steps$details)
 #Add metadata for plotting
 i4_meta <- map(i4_flat, \(df){
   df %>% left_join(distinct(summary_df[,c("Assemblage", "Id_gcs", "Uniq_db", "Ano")])) %>% 
-    left_join(Num.hab.df[,c("Id_db_ano", "Num.hab")], 
-              by = join_by("Assemblage" == "Id_db_ano")) %>% 
-    relocate(Assemblage, Id_gcs, Uniq_db, Ano)
+    left_join(Num.hab.df[,c("Identifier", "Num.hab")], 
+              by = join_by("Assemblage" == "Identifier")) %>% 
+    relocate(Assemblage, Id_gcs, Uniq_db, Ano) %>%
+    tibble()
 })
 
 ##Plotting & summary stats##
 
-#Sample Completeness#
-#Plot sample completeness profile
+# Sample Completeness #
+# Plot sample completeness profile
 facet_labels <- c("1" = "1 Habitat",
                   "2" = "2 Habitats",
                   "3" = "3 Habitats",
                   "4" = "4 Habitats")
 
 ggplot(data = i4_meta$`Sample completeness`, 
-                  aes(x = Order.q, y = Estimate.SC, color = Uniq_db, group = Assemblage)) + 
-  geom_line(alpha = 0.2) + 
+       aes(x = Order.q, y = Estimate.SC,  color = Uniq_db)) + 
+  geom_line(alpha = 0.2, aes(group = Assemblage), show.legend = TRUE) +  
   facet_wrap(~Num.hab, labeller = labeller(Num.hab = facet_labels)) +
   labs(x = "Order q", y = "Sample coverage", color = "Database") + 
   theme(legend.position = "top")
@@ -166,8 +188,7 @@ facet_labels_q <- c("0" = "q = 0",
                   "1" = "q = 1",
                   "2" = "q = 2")
 plot_sp.div <- function(iNEXT_df, x_var, xlab, coverage = TRUE){
-  ggplot(data = iNEXT_df, aes(x = {{ x_var }}, y = qTD, 
-                              color = Uniq_db, group = interaction(Assemblage, Method))) + 
+  ggplot(data = iNEXT_df, aes(x = {{ x_var }}, y = qTD, color = Uniq_db, group = interaction(Assemblage, Method))) + 
     geom_point(data = df.pt, alpha = 0.8) + 
     geom_line(data = df.line, aes(linetype = Method), lwd=1.5, alpha = 0.3) +
     facet_wrap(~Order.q, labeller = labeller(Order.q = facet_labels_q)) + 
@@ -200,17 +221,28 @@ ggplot(data = i4_meta$Evenness_E3,
   theme(legend.position = "top")
 #ggsave("Figures/Evenness_prof.png", bg = "white", width = 9)
 
-# >Preliminary analysis ---------------------------------------------------
+# Preliminary analysis ---------------------------------------------------
 #Goal: Understand how database (‘Uniq_db’), ecoregion, and the number of habitats surveyed (‘Num.hab’) influence taxonomic diversity & evenness for q = 0 (non-asymptotic at Cmax), as well as q = 1 & 2 (asymptotic). These are important variables to consider when interpreting taxonomic diversity results & thinking of potential biases.
 
-df.a <- summary_df %>% filter(Id_gcs != 3133) %>% #Remove UBC farm with 2 forest points
+# Remove UBC farm with 2 forest points
+df.a <- summary_df %>% filter(Id_gcs != 3133) %>%
   left_join(distinct(Bird_pcs, Id_gcs, Ecoregion))
-summary(lm(No_Asy_TD ~ Num.hab + Ecoregion, data = filter(df.a, Order.q == 0)))
-summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = filter(df.a, Order.q == 1)))
-summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = filter(df.a, Order.q == 2)))
-summary(lm(Evenness ~ Num.hab + Uniq_db + Ecoregion, data = filter(df.a, Order.q == 1)))
-summary(lm(Evenness ~ Num.hab + Uniq_db + Ecoregion, data = filter(df.a, Order.q == 2)))
 
+# Create list, separating tbl by the order q 
+Hill_nums <- setNames(c(0,1,2), c("Richness", "Shannon", "Simpson"))
+df.a.l <- map(Hill_nums, \(order.q){
+  df.a %>% filter(Order.q == order.q)
+})
+
+## Run models
+summary(lm(No_Asy_TD ~ Num.hab + Ecoregion, data = df.a.l$Richness))
+summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Shannon))
+summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Simpson))
+summary(lm(Evenness ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Shannon))
+summary(lm(Evenness ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Simpson))
+
+
+# EXTRAS ------------------------------------------------------------------
 # Original iNEXT --------------------------------------------------------
 ##Species diversity by farm##
 start <- Sys.time() #Note this function takes time, can load time heavy objects above
