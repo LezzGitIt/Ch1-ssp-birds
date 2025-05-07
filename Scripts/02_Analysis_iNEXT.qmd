@@ -1,0 +1,532 @@
+---
+title: "Bird diversity estimates on SCR farms"
+# If you do not want code to show... echo: false
+execute: 
+ # echo: false
+ message: false
+ warning: false
+format: pdf
+editor: visual
+knitr:
+  opts_chunk: 
+    comment: "#>"
+    collapse: true
+editor_options: 
+  chunk_output_type: console
+---
+
+{{< pagebreak >}}
+
+This script creates various species accumulation curves to generate comparable estimates of biodiversity across farms with different sampling efforts.
+
+See associated documents in SNAPP -\> Taxonomic diversity, as well as the associated Chao et al. (2020) paper.
+
+**Note:** Some point counts are sampled multiple times while others are sampled once. For example, a GAICA farm & CIPAV farm each may have 4 point counts, but GAICA could have sampled each farm 4x while CIPAV only 1x.
+
+[Location in Box:]{.underline}
+
+Colombia_SCR_SNAPP -\> SNAPP Products -\> Biodiversity -\> Birds -\> Taxonomic diversity\
+[Link](https://tnc.box.com/s/d3qavljtjef5fn93n9mqr8a00e6z92id)
+
+[Associated publications & documents:]{.underline}
+
+-   Chao, A., Kubota, Y., Zelený, D., Chiu, C., Li, C., Kusumoto, B., … Colwell, R. K. (2020). Quantifying sample completeness and comparing diversities among assemblages. *Ecological Research*, *35*(2), 292–314. <https://doi.org/10.1111/1440-1703.12102>
+
+    -   The publication provided key background information, as well as examples implementing the iNEXT 4 steps protocol & key interpretation. See Section 6.1 (‘Example 1: abundance based fossil data).
+
+-   iNEXT.4steps vignette
+
+    -   The iNEXT.4steps vignette was used to generate code (which was then adapted) heavily
+
+# Goal
+
+Make comparable estimates of taxonomic diversity using the integrated approach proposed by Chao et al. (2020) ‘based on the framework of Hill numbers to assess (a) the sample completeness profile, (b) asymptotic diversity estimates to infer true diversities of entire assemblages, (c) non-asymptotic standardization via rarefaction and extrapolation, and (d) an evenness profile.’
+
+# Background
+
+Estimates of diversity are parameterized by Hill numbers, which control for sensitivity to species relative abundances.
+
+-   When q = 0 (species richness) abundance is disregarded
+
+-   When q = 1 (Shannon diversity) species are weighed in proportion to their abundance. I.e., this is the ‘effective number of abundant species in the assemblage’
+
+-   When q = 2 (Simpson diversity) species are weighed by their squared abundance, so it is disproportionately sensitive to highly abundant species
+
+# Methodology
+
+We used Anne Chao's iNEXT 4 steps package to generate asymptotic & non-asymptotic estimates of diversity for each assemblage in the SCR project. In this case, an assemblage was a \[farm \* unique database \* AñoGrp\], for example 3886.GAICA Distancia.2019. Bird abundances were summed for each assemblage before calculation of diversity metrics (see aggregate data section).
+
+# Libraries
+
+```{r}
+#| label: Libraries
+#| message: false
+
+library(iNEXT)
+library(iNEXT.4steps)
+library(vegan)
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(cowplot)
+library(conflicted)
+library(ggpubr)
+library(writexl)
+
+ggplot2::theme_set(theme_cowplot())
+conflicts_prefer(dplyr::select)
+conflicts_prefer(dplyr::filter)
+```
+
+# Load Data
+
+```{r}
+#| label: Load-data
+load("Rdata/the_basics_02.27.25.Rdata")
+source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
+Birds_analysis <- read_excel(path = "Derived/Excels/Birds_analysis.xlsx")
+
+path_td <- "/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/PhD/SCR_SNAPP/SNAPP/Taxonomic_diversity/Excels/"
+results_no_rm <- read_excel(path = paste0(path_td, "Tax_div_Rd3_no_rm.xlsx"))
+```
+
+# Row Identifier
+
+The unique row identifier \[e.g. ID x Year\] is critical , this defines what a column is in your species by site matrix.
+
+Uniq_db = The unique data base\
+Id_gcs = Farm ID\
+Ano_grp = the 'year group' for which diversity was estimated. NOTE:: that some farms were sampled in multiple months over consecutive years (e.g. November 2016 and February of 2017), so these were grouped together
+
+```{r}
+#| label: Row-ID
+Row_id_inext <- c("Uniq_db", "Id_gcs", "Ano_grp")
+#Row_id_inext <- c("Uniq_db", "Id_muestreo", "Ano_grp")
+```
+
+NOTE:: Using \[farm \* unique database \* AñoGrp\] creates 100+ lines in each plot, making it difficult to extract trends. However, these are the plots that match the associated Excel (each row is a \[farm \* unique database \* AñoGrp\]) & are those that would be used in SESYNC type analyses. The following plots may be more useful if accumulation curves were plotted for each Ecoregion, Number of habitats surveyed, or data collector instead of each \[farm \* unique database \* AñoGrp\].
+
+# Prep Data Frames
+
+## Remove farms low SC
+
+After running through this script once, I noticed there were several farms that had very low sample coverage (SC). I remove the 9 \[farm \* unique database \* AñoGrp\] with observed SC \< .65 in order to remove
+
+```{r}
+#| label: Rm-farms
+
+Rm_farms <- results_no_rm %>% arrange(SC_obs) %>% 
+  filter(SC_obs < .65) %>% 
+  distinct(across(all_of(Row_id_inext))) %>% 
+  mutate(Uniq_db = str_replace_all(Uniq_db, "_", " "),
+         Ano_grp = str_replace_all(Ano_grp, "_", "-"))
+
+Birds_analysis2 <- Birds_analysis %>% anti_join(Rm_farms)
+```
+
+## Aggregate data
+
+There are three places where we need to make a decision regarding the aggregation of data.
+
+1.  How should we summarize multiple seasons (i.e., surveys that are several months a part) within a single year (Ano_grp)?
+
+2.  How do we summarize multiple surveys within a farm?
+
+3.  How do we summarize multiple days of repeat surveys within a season?
+
+For #1, let's remove the second round of surveys that were collected within a single Ano_grp.
+
+```{r}
+#| label: Remove-late-season 
+
+date_join <- Pc_date8 %>%
+  select(all_of(Row_id_inext), Fecha, Season) %>% 
+  distinct()
+Birds_analysis3 <- Birds_analysis2 %>% left_join(date_join) %>% 
+  filter(Season != "Late")
+```
+
+For #2 and #3, I think it makes sense to sum multiple surveys within a farm & multiple days of repeat surveys within a season. The iNEXT curves are built using the abundances & the new species identified with increasing survey effort. If we took the mean we would be inflating the species richness relative to the abundances.
+
+Create a custom function to sum the number of individuals appropriately, and pivot data frame so each species is row & each column is a unique combination of `r Row_id_inext`.
+
+```{r}
+#| label: Pivot-function
+pivot_wider_inext <- function(row_id, level.farm = FALSE){
+  if(level.farm){
+    Birds_analysis3 <- Birds_analysis3 %>% filter(!is.na(Id_gcs))
+  }
+  Birds_analysis3 %>%
+    mutate(Identifier = pmap_chr(
+      across(all_of(row_id)), ~ paste(..., sep = ".")
+    )) %>%
+    # Sum within a farm on a given day & survey repetition
+    summarize(Count = sum(Count), 
+              .by = c(Identifier, Nombre_ayerbe, Fecha, Rep)) %>%
+    # Sum across multiple surveys on separate days
+    summarize(Count = sum(Count),
+              .by = c(Identifier, Nombre_ayerbe)) %>%
+    pivot_wider(names_from = Identifier,
+                values_from = Count, 
+                values_fill = 0)
+}
+```
+
+Apply custom pivot_wider function
+
+```{r}
+#| label: Pivot-data
+
+# Each column is a farm X data base X year
+birds_wide_farm <- pivot_wider_inext(
+  row_id = Row_id_inext, level.farm = TRUE
+) %>% rename_with(~ str_replace_all(., pattern = " |-", replacement = "_")) 
+birds_wide_farm
+```
+
+Each row is a species & each assemblage \[farm \* unique database \* AñoGrp\] is a column.
+
+CHECK:: Should be 1 row per species, but note there are 13 species observed only in Otun Quimbaya that have been removed, as Otun is not associated with any SCR farm.
+
+```{r}
+#| label: Pivot-check
+nrow(birds_wide_farm)
+length(unique(Birds_analysis3$Nombre_ayerbe))
+```
+
+```{r}
+#| label: Format-rownames
+
+bw_df_farm <- birds_wide_farm %>% 
+  column_to_rownames(var = "Nombre_ayerbe")
+
+```
+
+bw_df_farm is the data set we will analyze, there are `r nrow(bw_df_farm)` species (rows) & `r ncol(bw_df_farm)` assemblages \[farm \* unique database \* AñoGrp\].
+
+```{r}
+#| label: Farms-mult-datacollectors
+#| include: false
+
+Mult_dc_farms <- Birds_analysis3 %>% count(Uniq_db, Id_gcs) %>%
+  count(Id_gcs, sort = T) %>% 
+  filter(n > 1)
+```
+
+NOTE: While there are `r ncol(bw_df_farm)` assemblages, there are `r nrow(Mult_dc_farms)` farms that were surveyed by multiple data collectors, so they contain more rows than other farms.
+
+```{r}
+#| label: format-pc
+#| include: false
+
+# Each column is a point count
+birds_wide_pc <- pivot_wider_inext(row_id = "Id_muestreo")
+bw_df_pc <- birds_wide_pc %>% 
+  column_to_rownames(var = "Nombre_ayerbe")
+```
+
+# Number of Habitats Data Frame
+
+Generate number of habitats per farm ID X Uniq_db X Ano_grp. We will use this down the line in preliminary analyses
+
+```{r}
+#| label: Num-habitat
+
+date_join2 <- Pc_date8[,c("Id_muestreo", "Uniq_db", "Ano_grp")] %>% distinct()
+
+Num.hab.df <- Pc_hab %>%
+  distinct(Id_gcs, Uniq_db, Id_muestreo, Habitat_cons) %>%
+  left_join(date_join2) %>%
+  filter(!is.na(Id_gcs)) %>%
+  mutate(Identifier = pmap_chr(
+    across(all_of(Row_id_inext)), ~ paste(..., sep = ".")
+  )) %>%
+  summarize(Num.hab = as.factor(length(unique(Habitat_cons))), 
+            .by = Identifier) %>% 
+  arrange(desc(Num.hab)) %>% 
+  mutate(Identifier = str_replace_all(
+    Identifier, pattern = " |-", replacement = "_"))
+```
+
+# iNEXT 4 Steps
+
+Now that the data is formatted, we can follow the iNEXT 4 steps workflow outlined in Chao et al 2020. We will bootstrap the analysis 100 times to obtain estimates of uncertainty as well.
+
+```{r}
+#| label: iNEXT-4steps
+#| cache: true
+
+i4steps <- iNEXT4steps(data = bw_df_farm, nboot = 100, details = TRUE, datatype = "abundance")
+#warnings()
+```
+
+The iNEXT 4 steps workflow stresses the max coverage value, i.e., Cmax, of your set of sites. The Cmax is the 'minimum among the coverage values for samples extrapolated to double the size of the reference sample. That is, each sample is first extrapolated to double the reference sample size. Then the maximum assemblage fraction that we can accurately infer, Cmax, is the minimum among the coverage values obtained from those extrapolated samples. For any standardized coverage up to Cmax, diversity and evenness estimates (as discussed in the next subsection) for the standardized assemblage fraction can then be assessed and compared across assemblages' (Chao et al, 2020).
+
+```{r}
+#| label: Cmax
+
+Cmax_str <- colnames(i4steps$summary$`STEP 3. Non-asymptotic coverage-based rarefaction and extrapolation analysis`)[1]
+Cmax_num <- round(as.numeric(str_split_i(Cmax_str, " ", i = 3)),2)
+```
+
+With all samples included we have a Cmax value of `r Cmax_num`, which is pretty low (compared to Chao et al, 2020).
+
+Name the "Assemblage' column, pivot_longer so Order.q is a single column. This permits joining with i4steps\$summary\[\[2\]\] in next step
+
+```{r}
+#| label: Long-dataframes
+
+values_to <- c("SC_obs", "No_Asy_TD", "Evenness") #No_Asy_TD = Non asymptotic estimate of taxonomic diversity
+dfs_long <- map2(i4steps$summary[c(1,3,4)], values_to, \(df, vt){
+  df %>% rename_with(.cols = 1, ~"Assemblage") %>% 
+    pivot_longer(cols = c(2:4), values_to = vt, names_to = "Order.q") %>% 
+    mutate(Order.q = str_remove(Order.q, "q = "))
+})
+```
+
+## Generate database
+
+Join the summary dataframes together with dfs_long data frames & Num.hab.df
+
+```{r}
+#| label: Summary-joined
+summary_df <- i4steps$summary[[2]]  %>% 
+  mutate(Order.q = as.character(case_when(
+    qTD == "Species richness" ~ 0,
+    qTD == "Shannon diversity" ~ 1,
+    qTD == "Simpson diversity" ~ 2
+  ))) %>%
+  left_join(dfs_long[[1]], by = c("Assemblage", "Order.q")) %>% 
+  left_join(dfs_long[[2]], by = c("Assemblage", "Order.q")) %>% 
+  full_join(dfs_long[[3]], by = c("Assemblage", "Order.q")) %>% 
+  left_join(Num.hab.df, by = join_by("Assemblage" == "Identifier")) %>%
+  mutate(Uniq_db = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,1],
+         Id_gcs = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,2],
+         Ano_grp = str_split_fixed(Assemblage, pattern = "\\.", n = 3)[,3]) %>% 
+  relocate(c(Uniq_db, Id_gcs, Ano_grp), .before = Assemblage) %>% 
+  relocate(Order.q, .after = qTD) %>% 
+  tibble()
+```
+
+# Plotting
+
+Add metadata for plotting from the 'details' slot
+
+```{r}
+#| label: Prep-plot
+
+i4_flat <- purrr::list_flatten(i4steps$details)
+```
+
+```{r}
+#| label: Add-metadata
+
+summary_join <- summary_df[,c("Assemblage", "Id_gcs", "Uniq_db", "Ano_grp")] %>%
+    distinct()
+
+i4_meta <- map(i4_flat, \(df){ 
+  df %>% left_join(summary_join) %>% 
+    left_join(Num.hab.df[,c("Identifier", "Num.hab")], 
+              by = join_by("Assemblage" == "Identifier")) %>% 
+    relocate(Assemblage, Id_gcs, Uniq_db, Ano_grp) %>% 
+    tibble() 
+  })
+```
+
+## Sample Completeness profiles
+
+Plot sample completeness profiles by habitat
+
+```{r}
+#| label: fig-sample-completeness
+#| fig-cap: Sample completeness profiles by the number of habitat types surveyed on each farm. Sample completeness profiles generally increase with diversity order (this is expected given that higher orders of q increasingly weight more abundant species), implying that there was undetected diversity within each [farm x unique database x AñoGrp]. Note that the undetected proportion of diversity can be calculated for any level of q. 
+
+facet_labels <- c("1" = "1 Habitat", "2" = "2 Habitats", "3" = "3 Habitats", "4" = "4 Habitats")
+
+i4_meta$`Sample completeness` %>% 
+  ggplot(aes(x = Order.q, y = Estimate.SC, color = Uniq_db)) + 
+  geom_line(alpha = 0.2, aes(group = Assemblage), show.legend = TRUE) +
+  facet_wrap(~Num.hab, labeller = labeller(Num.hab = facet_labels)) + 
+  labs(x = "Order q", y = "Sample coverage", color = "Database") + 
+  theme(legend.position = "top") 
+#ggsave("Figures/Sample_completeness_prof.png", bg = "white", width = 9)
+```
+
+## Size & coverage based curves
+
+Create dfs of the observed points & rarefied / extrapolated lines
+
+```{r}
+#| label: facet-plot-prep
+
+df.pt <- i4_meta$iNEXT_size_based %>%
+  filter(Method == "Observed")
+df.line <- i4_meta$iNEXT_size_based %>% 
+  filter(Method != "Observed") %>% 
+  mutate(Method = factor(Method, levels = c("Rarefaction", "Extrapolation")))
+
+# Facet labels
+facet_labels_q <- c("0" = "q = 0",
+                    "1" = "q = 1",
+                    "2" = "q = 2")
+
+# Custom function
+plot_sp.div <- function(iNEXT_df, x_var, xlab, coverage = TRUE){
+  ggplot(data = iNEXT_df, aes(x = {{ x_var }}, y = qTD, color = Uniq_db, group = interaction(Assemblage, Method))) + 
+    geom_point(data = df.pt, alpha = 0.8) + 
+    geom_line(data = df.line, aes(linetype = Method), lwd = 1.5, alpha = 0.3) +
+    facet_wrap(~Order.q, labeller = labeller(Order.q = facet_labels_q)) + 
+    labs(x = xlab, y = "Species diversity", color = "Database") + 
+    guides(linetype = "none") + 
+    theme(legend.position = "top") 
+}
+```
+
+```{r}
+#| label: fig-size-coverage-plots
+#| fig-cap: Sample-size (top plots) & coverage (bottom plots) based rarefaction (solid lines) and extrapolation (dashed lines) curves out to double the reference sample size for each [farm * unique database * AñoGrp]. We cannot make comparable estimates of species diversity beyond 91% of the assemblage fraction when q = 0.
+#| fig-height: 8
+
+size_based <- plot_sp.div(i4_meta$iNEXT_size_based, x_var = m, xlab = "Number of individuals", coverage = FALSE)
+coverage_based <- plot_sp.div(i4_meta$iNEXT_coverage_based, x_var = SC, xlab = "Sample Coverage") 
+
+ggarrange(size_based, coverage_based, nrow = 2, common.legend = TRUE)
+```
+
+A visual inspection shows that curves do not asymptote for species richness (q = 0), and thus we cannot reliably estimate true species richness for each \[farm \* unique database \* AñoGrp\]. This is expected as there are an almost infinite number of extremely rare species that could be present in the last few percentile points of your sample coverage. Thus, the asymptotic estimator for q = 0 represents a lower bound (i.e., is negatively biased). Given that we cannot estimate asymptotic diversity when q = 0, it is recommended to estimate diversity at a comparable sample coverage via rarefaction and extrapolation (i.e., non-asymptotic estimates of diversity). The iNEXT vignette states that “for species richness, the extrapolation method is reliable up to double the reference sample size; beyond that, the prediction bias may be large.” Thus, the max coverage comparable among all \[farm \* unique database \* AñoGrp\] (denoted as C~max~) is estimated as the minimum of 2x the reference (i.e., observed) samples. In our data C~max~ = `r Cmax_num`, which seems quite low compared to the four examples in Chao et al (2020; C~max~ \> 0.99 in all cases). The majority of \[farm \* unique database \* AñoGrp\] do asymptote for q = 1 & q = 2 (although some CIPAV curves with low sampling effort may not for q = 1), thus we can use the asymototic taxonomic diversity estimates for higher orders of q.
+
+## Asymptotic & empirical diversity profiles
+
+```{r}
+#| label: fig-asymptotic-empirical-diversity-profiles
+#| fig-cap: Asymptotic (solid lines) & empirical (dashed) diversity profiles for each database. The difference between asymptotic and empirical lines represent the mean undetected species richness for each data collector.
+
+i4_meta$`Observed and asymptotic diversity` %>% 
+  group_by(Uniq_db, Order.q, Method) %>% 
+  summarize(mean.TD = mean(qTD)) %>% 
+  ggplot(aes(x = Order.q, y = mean.TD, color = Uniq_db, group = interaction(Uniq_db, Method))) + 
+  geom_line(aes(linetype = Method), lwd = 1.5, alpha = 0.4) + 
+  labs(x = "Order q", y = "Mean species diversity", color = "Database") + 
+  guides(linetype = "none") + 
+  theme(legend.position = "top")
+# ggsave("Figures/Asy_emp_TD_prof.png", bg = "white", width = 9)
+```
+
+The low mean species diversity lines and different line shapes for CIPAV make me think something strange is going on there, especially since CIPAV did sample across the land use gradient. The lower diversity curves are likely because CIPAV only surveyed each point once (other data collectors surveyed 3-4x per year). The different shape of the curve, however, may suggest that the observers were not as skilled in bird ID (at least by ear) for the regions in question, thus they mostly reported common species and rarely registered rare species. This would result in little difference in diversity estimate as order q increases. 
+
+## Evenness profiles
+
+```{r}
+#| label: fig-evenness-profiles
+#| fig-cap: Evenness profiles for all [farm * unique database * AñoGrp] combinations holding sampling completeness at Cmax = 0.91. 
+
+ggplot(data = i4_meta$Evenness_E3, 
+       aes(x = Order.q, y = Evenness, color = Uniq_db, group = Assemblage)) +
+  geom_line(lwd = 1.5, alpha = 0.2) + 
+  labs(x = "Order q", y = "Evenness", color = "Database") + 
+  theme(legend.position = "top")
+```
+
+All farms have evenness of 1 when q = 0, because species richness does not account for species abundances at all. If CIPAV predominantly identified common species, it is not surprising that they show higher evenness than other data collectors.
+
+## Estimate + uncertainty plot
+
+Although no loner part of the iNEXT 4 steps protocol, it is important to understand how certain we are in our diversity estimates relative to how much diversity is estimated to be present.
+
+```{r}
+#| label: tax-div-comb-df
+
+q0 <- summary_df %>% filter(Order.q == 0) %>% 
+  select(Uniq_db, Assemblage, qTD, qTD.LCL, qTD.UCL, No_Asy_TD) %>% 
+  rename(TD_est = No_Asy_TD)
+q12 <- summary_df %>% filter(Order.q %in% c(1,2)) %>% 
+  select(Uniq_db, Assemblage, qTD, qTD.LCL, qTD.UCL, TD_asy) %>% 
+  rename(TD_est = TD_asy)
+TD_comb <- bind_rows(q0, q12) %>% 
+  mutate(qTD = factor(qTD), 
+         qTD = relevel(qTD, ref = "Species richness"))
+# Calculate mean for plotting
+TD_mean <- TD_comb %>% summarize(mean_TD = mean(TD_est), .by = c(Uniq_db, qTD))
+```
+
+```{r}
+#| label: fig-compare-error
+#| fig-cap: Estimates of taxonomic diversity along with their uncertainty (standard errors) for each assemblage. Black circles represent the mean taxonomic diversity estimate for each data collector.
+
+Cmax_note <- paste("For species richness\n", Cmax_str)
+TD_comb %>% ggplot(aes(x = qTD, y = TD_est, 
+                       group = interaction(Uniq_db, qTD))) + 
+  geom_errorbar(aes(ymin = qTD.LCL, ymax = qTD.UCL), width = .4,
+                position = position_dodge(width = .75), alpha = .2) + 
+  geom_point(position = position_jitterdodge(jitter.width = .08), 
+             alpha = .5, aes(color = Uniq_db)) + 
+  geom_point(data = TD_mean, aes(x = qTD, y = mean_TD),
+             position = position_dodge(width = .75), shape = 1, size = 3) + 
+  labs(x = NULL, y = "Taxonomic diversity", title = "Chao estimator") + 
+    theme(
+      axis.text.x = element_text(size = 9, vjust = .58, angle = 60)
+    ) + 
+  scale_color_hue(name = "Data collector") + 
+  lims(y = c(0, 100)) +
+  annotate(geom = "text", label = Cmax_note, x = "Simpson diversity", y = 90)
+```
+
+This plot could probably be improved by calculating a coefficient of variation, or some other metric that might be easier to interpret. There isn't too much additional information we glean, except that there is at least one gaica_mbd assemblage that has extremely high uncertainty for the species richness estimate.
+
+# Recommendations
+
+So what is likely the best metric to represent diversity at the level of the farm? I think it depends on what you all hope to convey.. Shannon's diversity considers both the number of species (richness) and the relative abundance of those species (evenness) in a community, so it strikes a good balance. On the other hand, Simpson's diversity places more emphasis on the most abundant species, which are likely those that are most important for ecosystem service provisioning. Let's see how correlated the metrics are.
+
+```{r}
+#| label: correlations
+
+cor_mat <- TD_comb %>%  
+  pivot_wider(id_cols = Assemblage, names_from = qTD, values_from = TD_est) %>% 
+  select(-c(Assemblage)) %>% 
+  cor() %>% 
+  round(2)
+cor_mat
+```
+
+Importantly, species richness & shannon's diversity are highly correlated (r = `r cor_mat[1,2]`), so it doesn't matter too much which of those two you use to represent diversity.
+
+# Preliminary analysis
+
+Goal: Understand how database (‘Uniq_db’), ecoregion, and the number of habitats surveyed (‘Num.hab’) influence taxonomic diversity & evenness for q = 0 (non-asymptotic at Cmax), as well as q = 1 & 2 (asymptotic). These are important variables to consider when interpreting taxonomic diversity results & thinking of potential biases that should be included in the final analysis that Maria Jimena will do.
+
+```{r}
+#| label: analysis-biases
+
+# Remove UBC farm with 2 forest points
+df.a <- summary_df %>% 
+  filter(Id_gcs != 3133) %>%
+  left_join(distinct(Bird_pcs, Id_gcs, Ecoregion)) %>% 
+  mutate(Num.hab = fct_inseq(Num.hab))
+
+# Create list, separating tbl by the order q 
+Hill_nums <- setNames(c(0,1,2), c("Richness", "Shannon", "Simpson"))
+df.a.l <- map(Hill_nums, \(order.q){
+  df.a %>% filter(Order.q == order.q)
+})
+
+## Run models
+summary(lm(No_Asy_TD ~ Uniq_db + Ecoregion, data = df.a.l$Richness))
+#summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Shannon))
+#summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Simpson))
+#summary(lm(Evenness ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Shannon))
+#summary(lm(Evenness ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Simpson))
+```
+
+Surprisingly, the number of habitats surveyed (not shown) and ecoregion (excluding Boyaca & Santander) didn’t influence species richness. Instead, the database was most important: compared to CIPAV MBD, all other databases reported higher species richness. There is obviously some conflation between the database and the Ecoregion (e.g., GAICA Distancia, UniLlanos & UBC only surveyed in El Piedemonte), but upon removing data collector from the model, only the estimate for El Piedemonte changed (showing significantly higher species relative to the baseline, El Atlantico). I don’t show evenness results, but all databases were less even than CIPAV at both q = 1 & 2.
+
+# Export
+
+Export database for sharing with collaborators
+
+```{r}
+#| label: export-database
+
+Td_metadata <- read_excel(paste0(path_td, "Tax_div_metadata.xlsx"))
+Tax_div_l_export <- list("Metadata" = Td_metadata, "Tax_div" = summary_df) 
+write_xlsx(Tax_div_l_export, paste0(path_td, "Tax_div_Rd3_", format(Sys.Date(), "%m.%d.%y"), ".xlsx"))
+```
