@@ -1,5 +1,6 @@
 ---
 title: "Bird diversity estimates on SCR farms"
+number-sections: true
 # If you do not want code to show... echo: false
 execute: 
  # echo: false
@@ -54,7 +55,7 @@ Estimates of diversity are parameterized by Hill numbers, which control for sens
 
 # Methodology
 
-We used Anne Chao's iNEXT 4 steps package to generate asymptotic & non-asymptotic estimates of diversity for each assemblage in the SCR project. In this case, an assemblage was a \[farm \* unique database \* AñoGrp\], for example 3886.GAICA Distancia.2019. Bird abundances were summed for each assemblage before calculation of diversity metrics (see aggregate data section).
+We used Anne Chao's iNEXT 4 steps package to generate asymptotic & non-asymptotic estimates of diversity for each assemblage in the SCR project. Chao's framework relies on the concept of sample completeness, where the order q defines how heavily abundances of species are weighted. For example, at q = 0, completeness refers to 'the ratio of the observed species richness to the true richness (observed plus undetected', but can be generalized for any order q ≥ 0 extends Turing's sample coverage and quantifies the propor- tion of the assemblage's individuals belonging to detected species, with each individual being proportionally weighted by the (q− 1)th power of its abun- dance. & or 'the proportion of the total number of individuals in the entire assemblage that belongs to detected species (Chao et al., 2020)'. This allows We define an assemblage as a \[farm \* unique database \* AñoGrp\], for example 3886.GAICA Distancia.2019. Bird abundances were summed for each assemblage before calculation of diversity metrics (see aggregate data section).
 
 # Libraries
 
@@ -72,6 +73,7 @@ library(cowplot)
 library(conflicted)
 library(ggpubr)
 library(writexl)
+library(gt)
 
 ggplot2::theme_set(theme_cowplot())
 conflicts_prefer(dplyr::select)
@@ -82,7 +84,7 @@ conflicts_prefer(dplyr::filter)
 
 ```{r}
 #| label: Load-data
-load("Rdata/the_basics_02.27.25.Rdata")
+load("Rdata/the_basics_05.10.25.Rdata")
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
 Birds_analysis <- read_excel(path = "Derived/Excels/Birds_analysis.xlsx")
 
@@ -108,20 +110,30 @@ NOTE:: Using \[farm \* unique database \* AñoGrp\] creates 100+ lines in each p
 
 # Prep Data Frames
 
-## Remove farms low SC
+## Remove farms low SC {#sec-Remove-farms-low-SC}
 
-After running through this script once, I noticed there were several farms that had very low sample coverage (SC). I remove the 9 \[farm \* unique database \* AñoGrp\] with observed SC \< .65 in order to remove
+After running through this script once, I noticed there were several farms that had very low sample coverage (SC). I remove the 9 \[farm \* unique database \* AñoGrp\] with observed SC \< .65 in order to increase the Cmax value (see @sec-Cmax).
 
 ```{r}
 #| label: Rm-farms
 
 Rm_farms <- results_no_rm %>% arrange(SC_obs) %>% 
   filter(SC_obs < .65) %>% 
-  distinct(across(all_of(Row_id_inext))) %>% 
+  # For visualization / clarity, doesn't impact results 
+  slice_min(SC_obs, by = all_of(Row_id_inext)) %>% 
+  distinct(across(all_of(Row_id_inext)), SC_obs) %>% 
   mutate(Uniq_db = str_replace_all(Uniq_db, "_", " "),
          Ano_grp = str_replace_all(Ano_grp, "_", "-"))
 
 Birds_analysis2 <- Birds_analysis %>% anti_join(Rm_farms)
+```
+
+Farms removed due to low sample coverage:
+
+```{r}
+#| label: visualize-rm-farms
+
+Rm_farms %>% arrange(Uniq_db, Id_gcs)
 ```
 
 ## Aggregate data
@@ -260,6 +272,8 @@ i4steps <- iNEXT4steps(data = bw_df_farm, nboot = 100, details = TRUE, datatype 
 #warnings()
 ```
 
+## Cmax value {#sec-Cmax}
+
 The iNEXT 4 steps workflow stresses the max coverage value, i.e., Cmax, of your set of sites. The Cmax is the 'minimum among the coverage values for samples extrapolated to double the size of the reference sample. That is, each sample is first extrapolated to double the reference sample size. Then the maximum assemblage fraction that we can accurately infer, Cmax, is the minimum among the coverage values obtained from those extrapolated samples. For any standardized coverage up to Cmax, diversity and evenness estimates (as discussed in the next subsection) for the standardized assemblage fraction can then be assessed and compared across assemblages' (Chao et al, 2020).
 
 ```{r}
@@ -269,9 +283,11 @@ Cmax_str <- colnames(i4steps$summary$`STEP 3. Non-asymptotic coverage-based rare
 Cmax_num <- round(as.numeric(str_split_i(Cmax_str, " ", i = 3)),2)
 ```
 
-With all samples included we have a Cmax value of `r Cmax_num`, which is pretty low (compared to Chao et al, 2020).
+Even after removing farms with low SC (see @sec-Remove-farms-low-SC), we have a Cmax value of `r Cmax_num`, which is pretty low compared to Chao et al. (2020). **This means that for species richness, we can make valid comparisons across assemblages up to a `r Cmax_num`% assemblage fraction.**
 
-Name the "Assemblage' column, pivot_longer so Order.q is a single column. This permits joining with i4steps\$summary\[\[2\]\] in next step
+Back to the code... Name the "Assemblage' column, pivot_longer so Order.q is a single column. This permits joining with i4steps\$summary\[\[2\]\] in next step
+
+## Generate database
 
 ```{r}
 #| label: Long-dataframes
@@ -284,12 +300,12 @@ dfs_long <- map2(i4steps$summary[c(1,3,4)], values_to, \(df, vt){
 })
 ```
 
-## Generate database
-
 Join the summary dataframes together with dfs_long data frames & Num.hab.df
 
 ```{r}
-#| label: Summary-joined
+#| lst-label: lst-summary-df
+#| lst-cap: Dataframe that we will ultimately export. 
+
 summary_df <- i4steps$summary[[2]]  %>% 
   mutate(Order.q = as.character(case_when(
     qTD == "Species richness" ~ 0,
@@ -462,7 +478,7 @@ TD_comb %>% ggplot(aes(x = qTD, y = TD_est,
              alpha = .5, aes(color = Uniq_db)) + 
   geom_point(data = TD_mean, aes(x = qTD, y = mean_TD),
              position = position_dodge(width = .75), shape = 1, size = 3) + 
-  labs(x = NULL, y = "Taxonomic diversity", title = "Chao estimator") + 
+  labs(x = NULL, y = "Taxonomic diversity") + #, title = "Chao estimator" 
     theme(
       axis.text.x = element_text(size = 9, vjust = .58, angle = 60)
     ) + 
@@ -490,7 +506,7 @@ cor_mat
 
 Importantly, species richness & shannon's diversity are highly correlated (r = `r cor_mat[1,2]`), so it doesn't matter too much which of those two you use to represent diversity.
 
-# Preliminary analysis
+# Preliminary analysis of biases
 
 Goal: Understand how database (‘Uniq_db’), ecoregion, and the number of habitats surveyed (‘Num.hab’) influence taxonomic diversity & evenness for q = 0 (non-asymptotic at Cmax), as well as q = 1 & 2 (asymptotic). These are important variables to consider when interpreting taxonomic diversity results & thinking of potential biases that should be included in the final analysis that Maria Jimena will do.
 
@@ -521,7 +537,7 @@ Surprisingly, the number of habitats surveyed (not shown) and ecoregion (excludi
 
 # Export
 
-Export database for sharing with collaborators
+Export @lst-summary-df (i.e. summary_df) for sharing with collaborators
 
 ```{r}
 #| label: export-database
@@ -530,3 +546,11 @@ Td_metadata <- read_excel(paste0(path_td, "Tax_div_metadata.xlsx"))
 Tax_div_l_export <- list("Metadata" = Td_metadata, "Tax_div" = summary_df) 
 write_xlsx(Tax_div_l_export, paste0(path_td, "Tax_div_Rd3_", format(Sys.Date(), "%m.%d.%y"), ".xlsx"))
 ```
+
+$$ 
+\beta_{sma} = \beta_{ols} / r
+$$ {#eq-sma-slope}
+
+@eq-sma-slope shows SMA slope.
+
+$\beta_{sma} = \beta_{ols} / r$ is critical, but so is $cov[X] / cov[Y]$
