@@ -128,13 +128,15 @@ Rm_farms <- results_no_rm %>% arrange(SC_obs) %>%
 Birds_analysis2 <- Birds_analysis %>% anti_join(Rm_farms)
 ```
 
-Farms removed due to low sample coverage:
+Assemblages removed due to low sample coverage:
 
 ```{r}
 #| label: visualize-rm-farms
 
 Rm_farms %>% arrange(Uniq_db, Id_gcs)
 ```
+
+Note that while this is 8 assemblages, there is only one farm that is actually removed (Cipav 1262), b/c the other farms all other sampled in other periods.
 
 ## Aggregate data
 
@@ -547,10 +549,22 @@ Tax_div_l_export <- list("Metadata" = Td_metadata, "Tax_div" = summary_df)
 write_xlsx(Tax_div_l_export, paste0(path_td, "Tax_div_Rd3_", format(Sys.Date(), "%m.%d.%y"), ".xlsx"))
 ```
 
-$$ 
-\beta_{sma} = \beta_{ols} / r
-$$ {#eq-sma-slope}
+# Tracking farms
 
-@eq-sma-slope shows SMA slope.
+```{r}
+#| label: Tracking-farms
+inext_farms <- bw_df_farm %>% colnames() %>% 
+  str_split_i("\\.", i = 2) %>% 
+  unique() %>% 
+  tibble(Id_gcs = .) %>% 
+  standardize_column_contents(col = Id_gcs)
 
-$\beta_{sma} = \beta_{ols} / r$ is critical, but so is $cov[X] / cov[Y]$
+Ecotropico_dfs <- Bird_pcs %>% pull(Id_gcs) %>% 
+  unique() %>% 
+  tibble(Id_gcs = .) %>% 
+  mutate(Id_gcs = str_replace(Id_gcs, " ", "_"))
+
+inext_farms %>% full_join(Ecotropico_dfs, keep = TRUE) %>% 
+  rename_with(~ c("Id_inext", "Id_ecotropico"))# %>% 
+  #write.xlsx(file = "Derived/Id_gcs.xlsx")
+```

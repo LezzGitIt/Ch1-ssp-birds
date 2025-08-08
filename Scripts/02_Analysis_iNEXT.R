@@ -13,11 +13,12 @@
 # 4) Original iNEXT -- Before I discovered the iNEXT.4steps package I used the regular iNEXT package. I haven't revisited this code but it may not be necessary with improved iNEXT.4steps code
 # 5) Vegan::specaccum() -- In Vegan we can create species accumulation curves based on the number of point counts on each farm. It seems like this is not necessary with the new iNEXT4steps framework, but Arturo recommended this at some point 
 
-# Load libraries & data ---------------------------------------------------
+# Libraries ---------------------------------------------------
 library(iNEXT)
 library(iNEXT.4steps)
 library(vegan)
 library(tidyverse)
+library(readxl)
 library(janitor)
 library(cowplot)
 library(conflicted)
@@ -26,17 +27,15 @@ ggplot2::theme_set(theme_cowplot())
 conflicts_prefer(dplyr::select)
 conflicts_prefer(dplyr::filter)
 
-load("Rdata/the_basics_02.27.25.Rdata")
-#load("Rdata/Taxonomy_09.26.24.Rdata")
+# Load data ---------------------------------------------------------------
+load("Rdata/the_basics_05.10.25.Rdata")
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
-
 Birds_analysis <- read_excel(path = "Derived/Excels/Birds_analysis.xlsx")
 
-# vignette(topic = "Introduction", package = "iNEXT")
+# Define row identifier ---------------------------------------------------
 #NOTE:: The unique row identifier  [e.g. ID x Year] is critical , this defines what a row is in your dataframes and how many rows each dataframe will have 
 Row_id_inext <- c( "Uniq_db", "Id_gcs", "Ano_grp")
 
-# iNEXT curves -----------------------------------------------------------
 # Prep data frames ---------------------------------------------------------
 ## Sum number of individuals by each species, and pivot data frame so spp is row & each column is a.. 
 pivot_wider_inext <- function(row_id, level.farm = FALSE){
@@ -73,15 +72,11 @@ bw_df_farm <- birds_wide_farm %>% #birds wide data frame
   column_to_rownames(var = "Nombre_ayerbe")
 
 # Num.hab.df --------------------------------------------------------------
-#Generate number of habitats per farm ID X Uniq_db X Ano_grp
-# WE NEED ANO_GRP?
-
-Pc_hab %>% count(Id_muestreo, sort = T)
-Pc_hab %>% filter(Id_muestreo == "G-AD-M-CO_03") %>% 
-  select(Habitat_ut, Habitat_cons)
+# Generate number of habitats per farm ID X Uniq_db X Ano_grp
 
 # Generate tbl with the number of habitats surveyed on each farm
-date_join <- Pc_date8[,c("Id_muestreo", "Uniq_db", "Ano_grp")] %>% distinct()
+date_join <- Pc_date8[,c("Id_muestreo", "Uniq_db", "Ano_grp")] %>% 
+  distinct()
 Num.hab.df <- Pc_hab %>%
   distinct(Id_gcs, Uniq_db, Id_muestreo, Habitat_cons) %>%
   left_join(date_join) %>%
@@ -90,7 +85,7 @@ Num.hab.df <- Pc_hab %>%
     across(all_of(Row_id_inext)), ~ paste(..., sep = ".")
   )) %>%
   #Adding Uniq_db & Ecoregion don't change number of rows in resulting df 
-  #group_by(Identifier, Uniq_db) %>% #ADD ECOREGION HERE
+  #group_by(Identifier, Uniq_db) %>% 
   summarize(Num.hab = as.factor(length(unique(Habitat_cons))), 
             .by = Identifier) %>% 
   arrange(desc(Num.hab)) %>% 
@@ -98,10 +93,10 @@ Num.hab.df <- Pc_hab %>%
     Identifier, pattern = " |-", replacement = "_")
     ) 
 
-tabyl(Num.hab.df, Uniq_db, Num.hab)
+#tabyl(Num.hab.df, Uniq_db, Num.hab)
 
 # iNEXT4steps ------------------------------------------------------------
-i4steps <- iNEXT4steps(data = bw_df_farm, nboot = 0, details = TRUE) #TD = Taxonomic diversity
+i4steps <- iNEXT4steps(data = bw_df_farm, nboot = 0, details = TRUE)
 warnings()
 
 #Name "Assemblage' column, pivot_longer so Order.q is a single column. This permits joining with i4steps$summary[[2]] in next step
@@ -130,14 +125,10 @@ summary_df <- i4steps$summary[[2]]  %>%
   relocate(c(Uniq_db, Id_gcs, Ano), .before = Assemblage) %>% 
   relocate(Order.q, .after = qTD)
 
-#Export 
-#write.xlsx(summary_df, file = paste0("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/PhD/SCR My products/Taxonomic diversity/Tax_div_Rd2_", format(Sys.Date(), "%m.%d.%y"), ".xlsx"), 
-           #sheetName = "Diversity_estimates", row.names = F, showNA = F)
-
-#Prepare for plotting#
+# Prepare for plotting #
 i4_flat <- purrr::list_flatten(i4steps$details)
 
-#Add metadata for plotting
+# Add metadata for plotting
 i4_meta <- map(i4_flat, \(df){
   df %>% left_join(distinct(summary_df[,c("Assemblage", "Id_gcs", "Uniq_db", "Ano")])) %>% 
     left_join(Num.hab.df[,c("Identifier", "Num.hab")], 
@@ -146,7 +137,7 @@ i4_meta <- map(i4_flat, \(df){
     tibble()
 })
 
-##Plotting & summary stats##
+## Plotting & summary stats ##
 
 # Sample Completeness #
 # Plot sample completeness profile
@@ -166,24 +157,14 @@ ggplot(data = i4_meta$`Sample completeness`,
 #Size based rarefaction#
 #Create dfs of observed points & rarefied / extrapolated lines
 size_plots <- list()
-df.pt <- i4_meta$iNEXT_size_based %>% filter(Method == "Observed")
-df.line <- i4_meta$iNEXT_size_based %>% filter(Method != "Observed") %>% 
+df.pt <- i4_meta$iNEXT_size_based %>% 
+  filter(Method == "Observed")
+df.line <- i4_meta$iNEXT_size_based %>% 
+  filter(Method != "Observed") %>% 
   mutate(Method = factor(Method, levels = c("Rarefaction", "Extrapolation")))
 
-#Option 1: Plot each panel separately #DELETE#
-size_plots <- map(c(0,1,2), \(q){
-  obs_rich <- df.pt %>% filter(Order.q == q)
-  lines <- df.line %>% filter(Order.q == q)
-  
-  i4_meta$iNEXT_size_based %>% filter(Order.q == q) %>% 
-ggplot(aes(x = m, y = qTD, color = Uniq_db,  group = interaction(Assemblage, Method))) + 
-  geom_point(data = obs_rich) + 
-  geom_line(data = lines, aes(linetype = Method), lwd=1.5, alpha = 0.2) 
-})
-ggarrange(size_plots[[1]], size_plots[[2]], size_plots[[3]], common.legend = TRUE, nrow = 1)
-
-#Option 2: Plot using facets, this seems better
-#Note the df.pt & df.line aren't from the iNEXT_coverage_based dataframe, but doesn't seem like it makes a difference 
+# Plot using facets
+# Note the df.pt & df.line aren't from the iNEXT_coverage_based dataframe, but doesn't seem like it makes a difference 
 facet_labels_q <- c("0" = "q = 0",
                   "1" = "q = 1",
                   "2" = "q = 2")
@@ -241,6 +222,11 @@ summary(lm(TD_asy ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Simpson))
 summary(lm(Evenness ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Shannon))
 summary(lm(Evenness ~ Num.hab + Uniq_db + Ecoregion, data = df.a.l$Simpson))
 
+stop()
+# Export ------------------------------------------------------------------
+
+#write.xlsx(summary_df, file = paste0("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/PhD/SCR My products/Taxonomic diversity/Tax_div_Rd2_", format(Sys.Date(), "%m.%d.%y"), ".xlsx"), 
+#sheetName = "Diversity_estimates", row.names = F, showNA = F)
 
 # EXTRAS ------------------------------------------------------------------
 # Original iNEXT --------------------------------------------------------
@@ -365,7 +351,8 @@ ggsave(paste0(dir_figs_inext, "/SC_Dif_Asy_2x.png"), bg = "white")
 Sp_diversity_df <- AsyEst3 %>% select(Assemblage, Diversity, AsyEst) %>% 
   pivot_wider(names_from = Diversity, values_from = AsyEst)
 
-Sp_diversity_df %>% ggplot(aes(x = `Species richness`, y = `Shannon diversity`)) + #Shannon
+Sp_diversity_df %>% 
+  ggplot(aes(x = `Species richness`, y = `Shannon diversity`)) + #Shannon
   geom_point() +
   geom_smooth() + 
   labs(title = "Asymptotic estimates of species diversity")
