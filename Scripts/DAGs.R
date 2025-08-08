@@ -5,7 +5,14 @@
 # Background --------------------------------------------------------------
 # Goal: Estimate the direct effect of silvopasture on biodiversity
 
-# When specifying the DAG, we focus on the mechanistic relationships between variables. Variables that are just statistically correlated (but no mechanistic link) do not end up in the DAG. Thus, causal modeling helps us determine the appropriate variables to include (or not include) to obtain unbiased estimates of the parameters of interest. But it does not tell us how predictor variables may be related (i.e., interactions), or the functional form that variables should take.  
+# When specifying the DAG, we focus on the mechanistic relationships between variables. Variables that are just statistically correlated (but no mechanistic link) do not end up in the DAG. Thus, causal modeling helps us determine the appropriate variables to include (or not include) to obtain unbiased estimates of the parameters of interest. But it does not tell us how predictor variables may be related (i.e., interactions), or the functional form that variables should take. 
+
+
+# Libraries ---------------------------------------------------------------
+
+library(tidyverse)
+library(dagitty)
+library(ggdag)
 
 # Simple DAG --------------------------------------------------------------
 # Specify relationships for simplified dag
@@ -16,7 +23,7 @@ dag_simple <- dagify(
   outcome = "Biodiversity"
 )
 # Adjustment set 
-adjustmentSets(dag_simple, type = "minimal", effect = "direct") 
+adjustmentSets(dag_simple, type = "minimal") 
 
 # Plot
 tidy_dagitty(dag_simple, layout = "fr") %>% 
