@@ -72,7 +72,7 @@ tidy_dag_phd <- tidy_dagitty(dag_phd, layout = "fr") %>%
            name %in% c("species_misID", "Mathilde_biases", "Habitat_structure") ~ "Latent"
          ))
 
-#Using ggdag package
+# Using ggdag package
 set.seed(123)
 ggdag_status(tidy_dag_phd, text_col = "black",
              use_labels = "label",
@@ -84,11 +84,11 @@ ggdag_status(tidy_dag_phd, text_col = "black",
   theme_dag() + 
   guides(fill = "none", color = "none")
 
-#Or for additional customizability 
+# Or for additional customizability 
 set.seed(123)
 ggplot(data = tidy_dag_phd, aes(x = x, y = y, xend = xend, yend = yend)) +
   geom_dag_node(aes(color = Status)) +
-  geom_dag_label_repel(aes(label = label), force = 10) + #Tried the padding arguments but didn't have luck 
+  geom_dag_label_repel(aes(label = label), force = 10) + # Tried the padding arguments but didn't have luck 
   geom_dag_edges(curvature = 0) +
   theme_dag() +
   guides(fill = "none", color = "none")
