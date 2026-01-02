@@ -55,7 +55,7 @@ Estimates of diversity are parameterized by Hill numbers, which control for sens
 
 # Methodology
 
-We used Anne Chao's iNEXT 4 steps package to generate asymptotic & non-asymptotic estimates of diversity for each assemblage in the SCR project. Chao's framework relies on the concept of sample completeness, where the order q defines how heavily abundances of species are weighted. For example, at q = 0, completeness refers to 'the ratio of the observed species richness to the true richness (observed plus undetected', but can be generalized for any order q ≥ 0 extends Turing's sample coverage and quantifies the propor- tion of the assemblage's individuals belonging to detected species, with each individual being proportionally weighted by the (q− 1)th power of its abun- dance. & or 'the proportion of the total number of individuals in the entire assemblage that belongs to detected species (Chao et al., 2020)'. This allows We define an assemblage as a \[farm \* unique database \* AñoGrp\], for example 3886.GAICA Distancia.2019. Bird abundances were summed for each assemblage before calculation of diversity metrics (see aggregate data section).
+We used Anne Chao's iNEXT 4 steps package to generate asymptotic & non-asymptotic estimates of diversity for each assemblage in the SCR project. Chao's framework relies on the concept of sample completeness, where the order q defines how heavily abundances of species are weighted. For example, at q = 0, completeness refers to 'the ratio of the observed species richness to the true richness (observed plus undetected', but can be generalized for any order q ≥ 0 extends Turing's sample coverage and quantifies the proportion of the assemblage's individuals belonging to detected species, with each individual being proportionally weighted by the (q− 1)th power of its abundance. & or 'the proportion of the total number of individuals in the entire assemblage that belongs to detected species (Chao et al., 2020)'. This allows We define an assemblage as a \[farm \* unique database \* AñoGrp\], for example 3886.GAICA Distancia.2019. Bird abundances were summed for each assemblage before calculation of diversity metrics (see aggregate data section).
 
 # Libraries
 
@@ -86,7 +86,17 @@ conflicts_prefer(dplyr::filter)
 #| label: Load-data
 load("Rdata/the_basics_05.10.25.Rdata")
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
-Birds_analysis <- read_excel(path = "Derived/Excels/Birds_analysis.xlsx")
+
+
+Birds_analysis <- read_excel("Derived/Excels/Birds_analysis.xlsx")
+# Temporary data wrangling DELETE
+Birds_analysis <- Birds_analysis %>% rename(Species_ayerbe = Nombre_ayerbe)
+
+
+#Bird_pcs_analysis <- read_csv("Derived/Excels/Bird_pcs_analysis.csv")
+Event_covs <- read_csv("Derived/Excels/Event_covs.csv")
+Site_covs <- read_csv("Derived/Excels/Site_covs.csv")
+
 
 path_td <- "/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/PhD/SCR_SNAPP/SNAPP/Taxonomic_diversity/Excels/"
 results_no_rm <- read_excel(path = paste0(path_td, "Tax_div_Rd3_no_rm.xlsx"))
@@ -101,9 +111,14 @@ Id_gcs = Farm ID\
 Ano_grp = the 'year group' for which diversity was estimated. NOTE:: that some farms were sampled in multiple months over consecutive years (e.g. November 2016 and February of 2017), so these were grouped together
 
 ```{r}
-#| label: Row-ID
-Row_id_inext <- c("Uniq_db", "Id_gcs", "Ano_grp")
+#| label: Define-script-run-parameters
+
+# Row-ID
+Row_id_inext <- c("Uniq_db", "Id_gcs", "Ano_grp") 
 #Row_id_inext <- c("Uniq_db", "Id_muestreo", "Ano_grp")
+
+# Remove farms on the second run through 
+first_run <- FALSE
 ```
 
 NOTE:: Using \[farm \* unique database \* AñoGrp\] creates 100+ lines in each plot, making it difficult to extract trends. However, these are the plots that match the associated Excel (each row is a \[farm \* unique database \* AñoGrp\]) & are those that would be used in SESYNC type analyses. The following plots may be more useful if accumulation curves were plotted for each Ecoregion, Number of habitats surveyed, or data collector instead of each \[farm \* unique database \* AñoGrp\].
@@ -112,12 +127,14 @@ NOTE:: Using \[farm \* unique database \* AñoGrp\] creates 100+ lines in each p
 
 ## Remove farms low SC {#sec-Remove-farms-low-SC}
 
-After running through this script once, I noticed there were several farms that had very low sample coverage (SC). I remove the 9 \[farm \* unique database \* AñoGrp\] with observed SC \< .65 in order to increase the Cmax value (see @sec-Cmax).
+After running through this analysis once, I noticed there were several farms that had very low sample coverage (SC). I remove the 9 \[farm \* unique database \* AñoGrp\] with observed SC \< .65 in order to increase the Cmax value (see @sec-Cmax).
 
 ```{r}
 #| label: Rm-farms
 
-Rm_farms <- results_no_rm %>% arrange(SC_obs) %>% 
+if(first_run == FALSE){
+Rm_farms <- results_no_rm %>% 
+  arrange(SC_obs) %>% 
   filter(SC_obs < .65) %>% 
   # For visualization / clarity, doesn't impact results 
   slice_min(SC_obs, by = all_of(Row_id_inext)) %>% 
@@ -125,7 +142,9 @@ Rm_farms <- results_no_rm %>% arrange(SC_obs) %>%
   mutate(Uniq_db = str_replace_all(Uniq_db, "_", " "),
          Ano_grp = str_replace_all(Ano_grp, "_", "-"))
 
-Birds_analysis2 <- Birds_analysis %>% anti_join(Rm_farms)
+Birds_analysis <- Birds_analysis %>% anti_join(Rm_farms)
+}
+
 ```
 
 Assemblages removed due to low sample coverage:
@@ -133,7 +152,9 @@ Assemblages removed due to low sample coverage:
 ```{r}
 #| label: visualize-rm-farms
 
+if(first_run == FALSE){
 Rm_farms %>% arrange(Uniq_db, Id_gcs)
+}
 ```
 
 Note that while this is 8 assemblages, there is only one farm that is actually removed (Cipav 1262), b/c the other farms all other sampled in other periods.
@@ -154,10 +175,27 @@ For #1, let's remove the second round of surveys that were collected within a si
 #| label: Remove-late-season 
 
 date_join <- Pc_date8 %>%
-  select(all_of(Row_id_inext), Fecha, Season) %>% 
+  select(all_of(Row_id_inext), Fecha, Season) %>% #Season
   distinct()
-Birds_analysis3 <- Birds_analysis2 %>% left_join(date_join) %>% 
+Birds_analysis2 <- Birds_analysis %>% 
+  left_join(date_join) %>% 
   filter(Season != "Late")
+
+if(FALSE){
+## WORKING
+Pc_date8 %>% #2692
+  filter(Season == "Late") %>% 
+  tabyl(Rep)
+
+date_join <- Event_covs %>% 
+  left_join(Site_covs) %>%
+  select(all_of(Row_id_inext), Fecha, Rep_ano_grp) %>% #Season
+  distinct()
+Birds_analysis2 <- Birds_analysis %>% 
+  left_join(date_join) %>% 
+  filter(Rep_ano_grp < 5)
+}
+
 ```
 
 For #2 and #3, I think it makes sense to sum multiple surveys within a farm & multiple days of repeat surveys within a season. The iNEXT curves are built using the abundances & the new species identified with increasing survey effort. If we took the mean we would be inflating the species richness relative to the abundances.
@@ -168,18 +206,18 @@ Create a custom function to sum the number of individuals appropriately, and piv
 #| label: Pivot-function
 pivot_wider_inext <- function(row_id, level.farm = FALSE){
   if(level.farm){
-    Birds_analysis3 <- Birds_analysis3 %>% filter(!is.na(Id_gcs))
+    Birds_analysis2 <- Birds_analysis2 %>% filter(!is.na(Id_gcs))
   }
-  Birds_analysis3 %>%
+  Birds_analysis2 %>%
     mutate(Identifier = pmap_chr(
       across(all_of(row_id)), ~ paste(..., sep = ".")
     )) %>%
     # Sum within a farm on a given day & survey repetition
     summarize(Count = sum(Count), 
-              .by = c(Identifier, Nombre_ayerbe, Fecha, Rep)) %>%
+              .by = c(Identifier, Species_ayerbe, Fecha, Rep)) %>%
     # Sum across multiple surveys on separate days
     summarize(Count = sum(Count),
-              .by = c(Identifier, Nombre_ayerbe)) %>%
+              .by = c(Identifier, Species_ayerbe)) %>%
     pivot_wider(names_from = Identifier,
                 values_from = Count, 
                 values_fill = 0)
@@ -205,14 +243,14 @@ CHECK:: Should be 1 row per species, but note there are 13 species observed only
 ```{r}
 #| label: Pivot-check
 nrow(birds_wide_farm)
-length(unique(Birds_analysis3$Nombre_ayerbe))
+length(unique(Birds_analysis2$Species_ayerbe))
 ```
 
 ```{r}
 #| label: Format-rownames
 
 bw_df_farm <- birds_wide_farm %>% 
-  column_to_rownames(var = "Nombre_ayerbe")
+  column_to_rownames(var = "Species_ayerbe")
 
 ```
 
@@ -222,7 +260,7 @@ bw_df_farm is the data set we will analyze, there are `r nrow(bw_df_farm)` speci
 #| label: Farms-mult-datacollectors
 #| include: false
 
-Mult_dc_farms <- Birds_analysis3 %>% count(Uniq_db, Id_gcs) %>%
+Mult_dc_farms <- Birds_analysis2 %>% count(Uniq_db, Id_gcs) %>%
   count(Id_gcs, sort = T) %>% 
   filter(n > 1)
 ```
@@ -236,7 +274,7 @@ NOTE: While there are `r ncol(bw_df_farm)` assemblages, there are `r nrow(Mult_d
 # Each column is a point count
 birds_wide_pc <- pivot_wider_inext(row_id = "Id_muestreo")
 bw_df_pc <- birds_wide_pc %>% 
-  column_to_rownames(var = "Nombre_ayerbe")
+  column_to_rownames(var = "Species_ayerbe")
 ```
 
 # Number of Habitats Data Frame
@@ -553,11 +591,13 @@ write_xlsx(Tax_div_l_export, paste0(path_td, "Tax_div_Rd3_", format(Sys.Date(), 
 
 ```{r}
 #| label: Tracking-farms
+
+if(FALSE){
 inext_farms <- bw_df_farm %>% colnames() %>% 
   str_split_i("\\.", i = 2) %>% 
   unique() %>% 
-  tibble(Id_gcs = .) %>% 
-  standardize_column_contents(col = Id_gcs)
+  tibble(Id_gcs = .) #%>% 
+  #standardize_column_contents(col = Id_gcs)
 
 Ecotropico_dfs <- Bird_pcs %>% pull(Id_gcs) %>% 
   unique() %>% 
@@ -565,6 +605,8 @@ Ecotropico_dfs <- Bird_pcs %>% pull(Id_gcs) %>%
   mutate(Id_gcs = str_replace(Id_gcs, " ", "_"))
 
 inext_farms %>% full_join(Ecotropico_dfs, keep = TRUE) %>% 
-  rename_with(~ c("Id_inext", "Id_ecotropico"))# %>% 
+  rename_with(~ c("Id_inext", "Id_ecotropico")) %>% 
+  mutate(Same = Id_inext == Id_ecotropico)
   #write.xlsx(file = "Derived/Id_gcs.xlsx")
+}
 ```

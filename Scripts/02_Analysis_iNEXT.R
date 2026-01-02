@@ -30,7 +30,7 @@ conflicts_prefer(dplyr::filter)
 # Load data ---------------------------------------------------------------
 load("Rdata/the_basics_05.10.25.Rdata")
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
-Birds_analysis <- read_excel(path = "Derived/Excels/Birds_analysis.xlsx")
+Bird_pcs_analysis <- read_excel(path = "Derived/Excels/Bird_pcs_analysis.xlsx")
 
 # Define row identifier ---------------------------------------------------
 #NOTE:: The unique row identifier  [e.g. ID x Year] is critical , this defines what a row is in your dataframes and how many rows each dataframe will have 
@@ -40,13 +40,13 @@ Row_id_inext <- c( "Uniq_db", "Id_gcs", "Ano_grp")
 ## Sum number of individuals by each species, and pivot data frame so spp is row & each column is a.. 
 pivot_wider_inext <- function(row_id, level.farm = FALSE){
   if(level.farm){
-    Birds_analysis <- Birds_analysis %>% filter(!is.na(Id_gcs))
+    Bird_pcs_analysis <- Bird_pcs_analysis %>% filter(!is.na(Id_gcs))
   }
-  Birds_analysis %>%
+  Bird_pcs_analysis %>%
     mutate(Identifier = pmap_chr(
       across(all_of(row_id)), ~ paste(..., sep = ".")
     )) %>%
-    summarize(Count = sum(Count), .by = c(Identifier, Nombre_ayerbe)) %>%
+    summarize(Count = sum(Count), .by = c(Identifier, Species_ayerbe)) %>%
     #mutate(surveyNum = 1:n()) %>% 
     pivot_wider(names_from = Identifier,
                 values_from = Count, 
@@ -63,13 +63,13 @@ birds_wide_pc <- pivot_wider_inext(row_id = "Id_muestreo")
 
 #CHECK:: Should be 1 row per species
 nrow(birds_wide_farm)
-length(unique(Birds_analysis$Nombre_ayerbe)) # 12 species observed in Otun Quimbaya
+length(unique(Bird_pcs_analysis$Species_ayerbe)) # 12 species observed in Otun Quimbaya
 
 #Turn tibble to a dataframe w/ rownames
 bw_df_pc <- birds_wide_pc %>% #birds wide data frame
-  column_to_rownames(var = "Nombre_ayerbe")
+  column_to_rownames(var = "Species_ayerbe")
 bw_df_farm <- birds_wide_farm %>% #birds wide data frame
-  column_to_rownames(var = "Nombre_ayerbe")
+  column_to_rownames(var = "Species_ayerbe")
 
 # Num.hab.df --------------------------------------------------------------
 # Generate number of habitats per farm ID X Uniq_db X Ano_grp
@@ -348,7 +348,8 @@ ggplot(AsyEst3, aes(x = SC_obs, y = Dif_Asy_2x)) +
 ggsave(paste0(dir_figs_inext, "/SC_Dif_Asy_2x.png"), bg = "white")
 
 #Create Sp_diversity_df with the Asymptotic estimates of species diversity (can change to 'Observed' or Est2x as well)
-Sp_diversity_df <- AsyEst3 %>% select(Assemblage, Diversity, AsyEst) %>% 
+Sp_diversity_df <- AsyEst3 %>% 
+  select(Assemblage, Diversity, AsyEst) %>% 
   pivot_wider(names_from = Diversity, values_from = AsyEst)
 
 Sp_diversity_df %>% 
@@ -379,14 +380,14 @@ AsyEst3 %>% select(-Assemblage) %>%
 #Species richness by department plots
 Bird_pcs %>% filter(Nombre_institucion == "GAICA") %>% 
   group_by(Departamento, Ano) %>% 
-  summarize(Richness = length(unique(Nombre_ayerbe))) %>% 
+  summarize(Richness = length(unique(Species_ayerbe))) %>% 
   ggplot(aes(x = Departamento, y = Richness)) +
   geom_bar()
 
 Bird_pcs %>%
   #filter(Nombre_institucion == "GAICA") %>%
   group_by(Departamento, Uniq_db) %>%
-  summarize(Richness = length(unique(Nombre_ayerbe))) %>%
+  summarize(Richness = length(unique(Species_ayerbe))) %>%
   ggplot(aes(x= fct_reorder(Departamento, Richness, .fun = max), y = Richness, 
              fill = fct_reorder(Uniq_db, Richness, .fun = max))) + 
   geom_bar(stat = "identity", position = position_dodge()) +
@@ -455,10 +456,10 @@ estimateD(bird,
 #Create dataframe where Farm X PC X Datacollector are the rows#
 #Add or remove Ano_grp depending on Christina's preference
 srows <- Bird_pcs %>% 
-  group_by(Id_gcs, Uniq_db, Id_muestreo, Ano_grp, Nombre_ayerbe) %>% 
+  group_by(Id_gcs, Uniq_db, Id_muestreo, Ano_grp, Species_ayerbe) %>% 
   summarize(Count = sum(Count)) %>%
   #mutate(surveyNum = 1:n()) %>% 
-  pivot_wider(names_from = Nombre_ayerbe,
+  pivot_wider(names_from = Species_ayerbe,
               values_from = Count, 
               values_fn = mean,
               values_fill = 0)

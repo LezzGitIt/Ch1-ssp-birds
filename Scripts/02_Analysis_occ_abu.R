@@ -77,7 +77,7 @@ Abund_hist <- imap(Abund_in_range, \(abund, name){
 # Define calculate mean & dispersion function
 calc_mean_disp <- function(vec, name){
   tibble(
-    Nombre_ayerbe_ = name,
+    Species_ayerbe_ = name,
     mean_count = mean(vec, na.rm = TRUE),
     dispersion = var(vec, na.rm = TRUE) / mean_count,
     zeros = any(vec == 0)
@@ -138,10 +138,10 @@ fit_ml
 if(FALSE){
 # Pull the locations of the most abundant species, good candidates to try
 Top_abu_ord <- Top_abu_df2 %>% slice_max(order_by = Tot_count, n = 30) %>%
-  arrange(Nombre_ayerbe) %>%
+  arrange(Species_ayerbe) %>%
   arrange(desc(Tot_count)) %>% 
   #slice_head(n = 6) %>% 
-  pull(Nombre_ayerbe_)
+  pull(Species_ayerbe_)
 
 # Mixture = "P" is only thing allowed at present
 formula_b <- as.formula("~1 ~1 + (1 | Id_group)")
@@ -314,7 +314,7 @@ create_error_tbl <- function(fit_errors, just_errors_l) {
   error_tbl <- tibble(
     Date = date, 
     Time = time,
-    Nombre_ayerbe_ = names(fit_errors),
+    Species_ayerbe_ = names(fit_errors),
     Error_msg = map_chr(fit_errors, \(error) {
       str_extract_all(as.character(error), "vmmin|singular") %>%
         unlist() %>%
@@ -339,7 +339,7 @@ Spp_mods_info <- create_error_tbl(fit_errors, just_errors_l) %>%
 
 # Join with spp_info
 Spp_diagnostics <- Top_abu_df2 %>% left_join(Spp_mods_info) %>% 
-  select(-Nombre_ayerbe_) %>%
+  select(-Species_ayerbe_) %>%
   relocate(c(Date, Time), .before = 1)
 
 ## Metadata df
@@ -426,14 +426,14 @@ Diagnostics_imp2 <- map(Diagnostics_import, \(df){
 })
 
 Spp_diagnostics <- Diagnostics_imp2$Species_diagnostics %>% 
-  mutate(Nombre_ayerbe_ = str_replace_all(Nombre_ayerbe, " ", "_")) %>% 
-  relocate(Nombre_ayerbe_, .after = Nombre_ayerbe)
+  mutate(Species_ayerbe_ = str_replace_all(Species_ayerbe, " ", "_")) %>% 
+  relocate(Species_ayerbe_, .after = Species_ayerbe)
 
 # Examine trends with AICc as we iterate through models
 Spp_diagnostics %>% 
-  ggplot(aes(x = Mod_round, y = Aic_c, color = Nombre_ayerbe)) + 
+  ggplot(aes(x = Mod_round, y = Aic_c, color = Species_ayerbe)) + 
   geom_point() + 
-  geom_line(aes(group = Nombre_ayerbe)) +
+  geom_line(aes(group = Species_ayerbe)) +
   guides(color = "none")
 
 # Examine metadata associated with model rounds
@@ -444,9 +444,9 @@ Diagnostics_imp2$Model_metadata %>%
 ## See if there are predictors of lack of model fit 
 Mean_var_zeros <- Mean_var %>% filter(zeros == TRUE)
 Spp_diagnostics2 <- Spp_diagnostics %>%
-  mutate(N_err_msg = sum(!is.na(Error_msg)), .by = Nombre_ayerbe_) %>% 
+  mutate(N_err_msg = sum(!is.na(Error_msg)), .by = Species_ayerbe_) %>% 
   left_join(Mean_var_zeros) %>%
-  arrange(Nombre_ayerbe_) 
+  arrange(Species_ayerbe_) 
 
 Spp_diagnostics2 %>%
   select(N_err_msg, where(is.numeric)) %>%
