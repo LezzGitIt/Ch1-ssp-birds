@@ -1,0 +1,29 @@
+affiliations:
+  - id: ubc
+    name: University of British Columbia
+    department: Department of Zoology
+    city: Vancouver
+    region: BC
+    country: Canada
+
+  - id: tnc us
+    name: The Nature Conservancy
+    city: Fort Collins
+    region: Colorado
+    country: United States of America
+
+author:
+  - name: Aaron Skinner
+    email: skinnerayayron93@gmail.com
+    affiliations:
+      - ref: ubc
+    attributes:
+      corresponding: true
+      
+  - name: Claire Kremen
+    affiliations:
+      - ref: ubc
+      
+  - name: Christina Kennedy
+    affiliations:
+      - ref: tnc us

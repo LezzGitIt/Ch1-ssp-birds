@@ -1,0 +1,24 @@
+## It seems like the yml file can control certain things (directories, toc, etc.) but doesn't work for other things (chunk_output_type). In summary, the _yml file is important still. 
+
+project:
+  type: default
+  execute-dir: project
+  output-dir: Derived/
+format: 
+  pdf: 
+    header-includes:
+      - |
+        \renewcommand*{\Authsep}{, }
+        \renewcommand*{\Authand}{, }
+        \renewcommand*{\Authands}{, }
+        \renewcommand\Affilfont{\small}
+    pdf-engine: lualatex
+    author-affiliations: true
+    template-partials:
+      - Suppfiles/title.tex
+editor:
+  root-dir: "/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/PhD/Analysis/Ch1-ssp-birds"
+editor_options: 
+  chunk_output_type: console
+date: today
+date-format: long
