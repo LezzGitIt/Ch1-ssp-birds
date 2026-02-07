@@ -26,7 +26,6 @@ Hatico_pc_nums <- str_pad(1:12, width = 2, pad = 0)
 Pc_locs_dc_sf <- st_read(
   paste0(Wrangling_repo, "Derived_geospatial/shp/Pc_locs_dc.gpkg")
 ) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
-Tax_df <- read_csv(paste0(Wrangling_repo, Excels, "Taxonomy/Taxonomy.csv"))
 Bird_pcs_analysis <- read_csv(
   paste0(Wrangling_repo, Excels, "Bird_pcs/Bird_pcs_analysis.csv")
 ) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
@@ -35,6 +34,11 @@ Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>%
 Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv")) %>% 
   filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
 Ft <- read_csv(paste0(Wrangling_repo, Excels, "Functional_traits.csv"))
+
+# Remove these points 
+#aj_tbl <- Event_covs %>% filter(Uniq_db == "Gaica mbd" & Rep_season > 4)
+#Event_covs <- Event_covs %>% anti_join(aj_tbl)
+#Bird_pcs_analysis <- Bird_pcs_analysis %>% anti_join(aj_tbl)
 
 # Breeding records matrix from Moreno-palacios
 Breed_records <- read_csv("../Datasets_external/Palacios_breeding_database.csv") %>% 
@@ -45,20 +49,27 @@ Breed_records <- read_csv("../Datasets_external/Palacios_breeding_database.csv")
 
 load(paste0(Wrangling_repo, "Rdata/NE_layers_Colombia.Rdata")) 
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
-# vignette("unmarked") # Used vignette to help understand how data should be formatted
 
 # Row identifier ----------------------------------------------------------
+Event_covs %>% 
+  select(Id_muestreo, Ano_grp, N_samp_periods, Season, 
+         contains("rep", ignore.case = TRUE)) 
+
 #NOTE:: The unique row identifier  [e.g. ID x Year] is critical , this defines what a row is in your dataframes and how many rows each dataframe will have 
-Row_identifier <- c("Id_muestreo", "Ano_grp")
+Row_identifier <- c("Id_muestreo", "Ano_grp", "Season") #, "Season"
+
+# NOTE:: This is a REMINDER, need to replace all 'Rep ano grp' with 'Rep season' and viceaversa depending on whether "Season" is included in the Row_identifier
+Rep_identifier <- "Season" # Ano_grp
+paste0("Rep_", Rep_identifier)
 
 # Final formatting --------------------------------------------------------
 Bird_pcs_analysis2 <- Bird_pcs_analysis %>%
   mutate(Species_ayerbe_ = str_replace_all(Species_ayerbe, " ", "_"))
 
-## Add Rep_ano_grp to tbl 
-# Pc_start & Rep_ano_grp are equivalent in terms of grouping (when combined with Id_muestreo & Ano_grp), but since we are using Rep_ano_grp for formatting of analysis dataframes it makes sense to include Rep_ano_grp as well
+## Add Rep_season to tbl 
+# Pc_start & Rep_season are equivalent in terms of grouping (when combined with Id_muestreo & Ano_grp), but since we are using Rep_season for formatting of analysis dataframes it makes sense to include Rep_season as well
 date_join_spp_obs <- Event_covs %>% 
-  select(Id_muestreo, Ano_grp, Fecha, Pc_start, Rep_ano_grp)
+  select(Id_muestreo, Ano_grp, Season, Fecha, Pc_start, Rep_season)
 Bird_pcs_analysis3 <- Bird_pcs_analysis2 %>% 
   left_join(date_join_spp_obs)
 
@@ -72,9 +83,9 @@ Ft_abu <- Bird_pcs_analysis3 %>%
   left_join(Ft)
 
 ## Set minimum number of distinct point counts which in turn sets the number of species
-Num_locs_cutoff <- 50
+Num_locs_cutoff <- 100
 Ft_abu2 <- Ft_abu %>% filter(n > Num_locs_cutoff)
-nrow(Ft_abu2) # 1 = , 10 = 251 species, 25 = 160, 40 = 117, 50 = 100 species, 100 = 39 species
+nrow(Ft_abu2) # 1 loc = 462 species, 10 = 251 species, 25 = 160, 40 = 117, 50 = 100 species, 100 = 39 species
 
 ## We want to find a few distinct species to place at the top of the species x site matrix. We will examine body size, habitat associations, trophic levels, and range size
 Ft_abu3 <- Ft_abu2 %>% select(
@@ -122,7 +133,7 @@ Site_covs2 <- Site_covs %>%
     Habitat = fct_relevel(Habitat, c("Pastizales", "Mosaic", "Ssp", "Bosque")), #"Bosque ripario"
     Ecoregion = relevel(Ecoregion, ref = "Piedemonte")
   ) %>%
-  select(Id_muestreo, Ano_grp, Ano1, Id_gcs, Id_group_no_dc, Uniq_db, Ecoregion, Elev, Tot_prec, Habitat, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te)
+  select(all_of(Row_identifier), Ano1, Id_gcs, Id_group_no_dc, Uniq_db, Ecoregion, Elev, Tot_prec, Habitat, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te)
 
 # Scale numeric values, create categorical random effects
 Site_covs3 <- Site_covs2 %>%
@@ -215,11 +226,11 @@ Obs_covs_df <- Event_covs3 %>%
     names_to = "Variable",          
     values_to = "Value"             
   ) %>%
-  arrange(Ano_grp, Rep_ano_grp) %>%
+  arrange(across(all_of(Row_identifier[-1])), Rep_season) %>%
   pivot_wider(
     id_cols = c(all_of(Row_identifier), Variable),
-    names_from = c(Rep_ano_grp),
-    names_glue = "Rep_ano_grp{Rep_ano_grp}",
+    names_from = c(Rep_season),
+    names_glue = "Rep_season{Rep_season}",
     values_from = c(Value)
   ) 
 
@@ -257,11 +268,11 @@ Obs_covs_l2 <- map2(Obs_covs_l, convert_type, \(Obs_covs, type) {
 
 # Event_covs contains all points surveyed (including Spp_obs == 0)
 date_join_rep <- Event_covs %>% 
-  distinct(across(all_of(Row_identifier)), Rep_ano_grp)
+  distinct(across(all_of(Row_identifier)), Rep_season)
 
 # NOTE:: The right_join effectively adds NAs for Count where species could have been observed but weren't (lengthening the dataframe)
 Abund_no_obs <- Bird_pcs_analysis4 %>%
-  select(all_of(Row_identifier), Rep_ano_grp, Species_ayerbe_, Count) %>% 
+  select(all_of(Row_identifier), Rep_season, Species_ayerbe_, Count) %>% 
   right_join(date_join_rep) %>% 
   # Change NAs to 0s
   mutate(Count = if_else(is.na(Count), 0, Count))
@@ -273,25 +284,25 @@ Abund_no_obs %>% filter(is.na(Species_ayerbe_))
 Abund_no_obs2 <- Abund_no_obs %>%
   summarize(
     Count = sum(Count),
-    .by = c(Species_ayerbe_, Id_muestreo, Ano_grp, Rep_ano_grp)
+    .by = c(Species_ayerbe_, all_of(Row_identifier), Rep_season)
   )
 
 Abund_wide_l <- Abund_no_obs2 %>% 
-  mutate(Id_muestreo_ano = paste(Id_muestreo, Ano_grp, sep = ".")) %>%
+  unite(Id_muestreo_ano, all_of(Row_identifier), sep = ".", remove = FALSE) %>%
   arrange(across(all_of(Row_identifier))) %>%
-  select(-c(Id_muestreo, Ano_grp)) %>%
+  select(-all_of(Row_identifier)) %>%
   pivot_wider(
     names_from = Id_muestreo_ano,
     values_from = Count,
     values_fill = 0
   ) %>%
-  split(.$Rep_ano_grp)
+  split(.$Rep_season)
 
-# Generate a species list so that each replicate tbl (1-8) will have the full species list
+# Generate a species list so that each replicate tbl (1-5) will have the full species list
 Species_list <- Bird_pcs_analysis4 %>% distinct(Species_ayerbe_)
 # Join with Species_list and convert NAs to 0s
 Abund_rep_l <- map(Abund_wide_l, \(rep_df){
-  rep_df %>% select(-Rep_ano_grp) %>% 
+  rep_df %>% select(-Rep_season) %>% 
     right_join(Species_list) %>% 
     # Reorder species for more efficient estimation of latent factors
     arrange(match(Species_ayerbe_, Order_spp)) %>%
@@ -299,8 +310,13 @@ Abund_rep_l <- map(Abund_wide_l, \(rep_df){
     column_to_rownames(var = "Species_ayerbe_")
   })
 
+rownames(Abund_rep_l$`1`)[c(38, 14, 8, 43, 5, 6, 7)]
+
 # Any of the observation covs (start time, pc length, or date) dataframes have NAs where a given point count wasn't surveyed at a given repetition. Use this data frame to assign NAs to the abundance dataframe
-TF_mat <- !is.na(Obs_covs_l$Pc_start[,3:10])  #659 rows
+ncols_det <- ncol(Obs_covs_l$Pc_start)
+start_det_cols <- length(Row_identifier) + 1
+
+TF_mat <- !is.na(Obs_covs_l$Pc_start[,start_det_cols:ncols_det])  #659 rows
 
 Abund_nas <- map(seq_along(Abund_rep_l), \(replicate){
   
@@ -328,7 +344,7 @@ Abund_array[,1,2] # Second replicate is all NAs because CIPAV only surveyed once
 
 # Coordinates -------------------------------------------------------------
 
-add_year_join <- Site_covs2 %>% distinct(Id_muestreo, Ano_grp)
+add_year_join <- Site_covs2 %>% distinct(across(all_of(Row_identifier)))
 
 # Arrange coordinates 
 Coords_arr <- Pc_locs_dc_sf %>% 
@@ -419,8 +435,8 @@ cutoff <- 15
 Dist_to_pcs2 <- Dist_to_pcs %>%
   left_join(add_year_join) %>% # Add Ano_grp 
   arrange(across(all_of(Row_identifier))) %>%
-  mutate(Id_muestreo_ano = paste(Id_muestreo, Ano_grp, sep = ".")) %>% 
-  select(-c(Id_muestreo, Ano_grp))
+  unite(Id_muestreo_ano, all_of(Row_identifier), sep = ".", remove = FALSE) %>%
+  select(-all_of(Row_identifier))
 
 # Clip using predefined cutoff distance
 Biogeo_clip <- Dist_to_pcs2 %>%  
@@ -441,6 +457,11 @@ msOcc_l <- msAbu_l
 msOcc_l$y <- ifelse(msAbu_l$y > 0, 1, 0)
 names(msOcc_l)[2] <- "occ.covs"
 
+
+# Save object -------------------------------------------------------------
+
+saveRDS(msOcc_l, "Rdata/msOcc_l_season.rds")
+
 # EXTRAS ------------------------------------------------------------------
 stop()
 
@@ -452,7 +473,8 @@ check_l <- list(Site_covs3, Obs_covs_l[[1]], Coords_arr)
 names(check_l) <- c("Site_covs3", "Obs_covs_l", "Coords_arr")
 
 Order_id_ano <- map(check_l, \(df){
-  df %>% mutate(Id_muestreo_ano = paste(Id_muestreo, Ano_grp, sep = ".")) %>% 
+  df %>% 
+    unite(Id_muestreo_ano, all_of(Row_identifier), sep = ".", remove = FALSE) %>% 
     pull(Id_muestreo_ano)
 })
 
@@ -465,7 +487,6 @@ table(names(Biogeo_clip) == Order_id_ano$Obs_covs_l)
 # If any problems.. Diagnose
 probs <- which(!Order_id_ano$Site_covs3 == Order_id_ano$Obs_covs_l)
 Site_covs3 %>% slice(probs) 
-
 
 # >Plot probability breeding ----------------------------------------------
 ## Plot in observed data
