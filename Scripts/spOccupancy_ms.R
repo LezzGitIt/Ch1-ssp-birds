@@ -199,7 +199,7 @@ priors <- list(beta.normal = list(mean = 0, var = 2.72),
 
 
 ## Initial values
-n.factors <- 7
+n.factors <- 2
 # Number of species
 N <- nrow(msOcc_l$y)
 # Initiate all lambda initial values to 0. 
@@ -217,13 +217,13 @@ lambda.inits
 
 # >Run mod ----------------------------------------------------------------
 ## Model paramaters
-n.batch <- 200
+n.batch <- 400
 batch.length <- 25
 n.chains <- 3
 Samples_per_chain <- n.batch * batch.length # Total number of samples 
 
 # We throw away much of the MCMC work 
-n.burn <- 3000 
+n.burn <- 6000 
 n.thin <- 4
 
 # Total samples per chain - burn in per chain
@@ -234,7 +234,7 @@ Tot_samples
 
 # dim(msOcc_l$y)
 start <- Sys.time()
-ms_100_season <- svcMsPGOcc(
+ms_14_season <- svcMsPGOcc(
   occ.formula = occ.formula, 
   det.formula = det.formula, 
   data = msOcc_l, 
@@ -260,7 +260,7 @@ ms_100_season <- svcMsPGOcc(
 )
 end <- Sys.time()
 end - start
-Occ_mod <- ms_100_season
+Occ_mod <- ms_14_season
 
 # Expected log pointwise predictive density (elpd), the effective number of parameters (pD), waic is the sum of the waic values for each species 
 waic_spp <- waicOcc(Occ_mod) 
@@ -269,8 +269,7 @@ stop()
 
 # >Extract parameters -----------------------------------------------------
 parms_df <- Occ_mod %>% 
-  extract_parms(spatial = TRUE, ms = TRUE) %>% 
-  left_join(Spp_ordered, by = join_by(Species_num == Order))
+  extract_parms(spatial = TRUE, ms = TRUE)
 
 # >Diagnostics ----------------------------------------------------------------
 summary(Occ_mod)
@@ -290,48 +289,44 @@ Prob_parms %>% tabyl(parameter, term)
 round(nrow(Prob_parms) / nrow(parms_df), 2) # 12%
 
 # >>Goodness of fit ------------------------------------------------------
-## Need to reduce the number of posterior samples for GOF check
-
-# Logical true false vector for subsetting
-TF <- str_detect(names(ms_100_8fac), "samples")
-Samples_l <- ms_100_8fac[TF][-15]
-
-# Subset 500 samples irrespective of dimensionality of the samples object
-samples_500 <- map(Samples_l, \(samples) {
-  random_sample <- sample(dim(samples)[1], 500, replace = FALSE)
-  if(length(dim(samples)) == 2){
-    samples[random_sample, , drop = FALSE]
-  } 
-  else if(length(dim(samples)) == 3){
-    samples[random_sample, , , drop = FALSE]
-  }
-  else if(length(dim(samples)) == 4){
-    samples[random_sample, , , , drop = FALSE]
-  }
-})
-
-# Create new object 
-samples_500_l <- ms_100_8fac
-# Overwrite with the smaller subset of samples
-samples_500_l[TF][-15] <- samples_500
-samples_500_l$n.post <- 500
-#samples_500_l$n.samples <- 500
-class(samples_500_l) # class = 'svcMsPGOcc'
-
-#rm(list = ls()[!(ls() %in% c("parms_df", "samples_500_l", "run_ppc"))])
-
-# All four combinations produce the same error
-ms_100_ppc <- ppcOcc(samples_500_l, fit.stat = "chi-squared", group = 1)
-
 # Run custom functions to extract GOF 
 # These ppc don't fit unless you use n.thin
-ms_100_ppc <- ms_39_ls_hab %>%  
+ms_14_ppc <- ms_14_season %>%  
   run_ppc() #%>% 
-gof_tbl_39 <- ms_100_ppc %>% extract_gof()
+gof_tbl_14 <- ms_14_ppc %>% extract_gof()
 
-plot_gof(gof_tbl_39)
+## Posterior predictive check for each species
+ppc_spp <- map(ms_14_ppc, calc_bayes_p_ms) %>% list_rbind() 
+# Plotting
+ppc_spp_plot <- ppc_spp %>% mutate(group_fit = paste(group, fit_stat, sep = ", "))
+# Subset species that 'pass / fail' the GOF test
+Spp_gof_fail <- ppc_spp_plot %>% filter(bayes_p < 0.1 | bayes_p > 0.9) 
+Spp_gof_pass <- ppc_spp_plot %>% filter(bayes_p > 0.1 | bayes_p < 0.9) 
 
-# Traceplots - spatial parameters
+# Posterior density plot 
+ppc_spp_plot %>% ggplot(aes(x = bayes_p, color = group_fit)) + 
+  geom_density() +
+  theme(legend.position = "top")
+
+# Violin plot
+ppc_spp_plot %>% ggplot(aes(y = group_fit, x = bayes_p)) +
+  geom_violin() + 
+  geom_jitter(data = Spp_gof_pass, width = 0.05, alpha = .7) + 
+  ggrepel::geom_text_repel(
+    data = Spp_gof_fail,
+    max.overlaps = 30, force = 10,
+    aes(label = Species),
+    ) + 
+  geom_vline(xintercept = 0.1, linetype = "dashed", alpha = .3, color = "red") +
+  labs(x = "Bayesian P", y = NULL)
+
+# Identify the problematic species in terms of goodness of fit 
+Spp_gof_fail %>% count(Species, sort = T)
+# Examine the percent of GOF tests that 'fail'
+nrow(Spp_gof_fail) / nrow(ppc_spp) # 50%
+
+# >>Traceplots ------------------------------------------------------------
+# Spatial parameters
 plot(Occ_mod, param = "theta", density = FALSE)
 # Traceplots - factor loadings 
 #plot(Occ_mod$lambda.samples[,140:150], param = "lambda", density = FALSE)
