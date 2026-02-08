@@ -5,17 +5,9 @@
 library(tidyverse)
 library(readxl)
 library(sf)
-library(unmarked)
-library(spAbundance)
 library(spOccupancy)
-library(ubms) # function get_stancode() could be used to get code from model
-library(flocker)
-library(brms)
-library(AICcmodavg)
-library(furrr) # Use furrr::future_map()
 library(coda)
 library(broom.mixed)
-library(tictoc)
 library(ggpubr)
 library(cowplot)
 library(conflicted)
@@ -28,9 +20,8 @@ conflicts_prefer(dplyr::filter)
 #load("Rdata/Occ_abu_models_01.19.25.Rdata")
 
 # Create space by removing old models
-Spp_ordered <- tibble(Species = rownames(Abund_rep_l$`1`)) %>% 
-  mutate(Order = as.character(row_number()))
-rm(list = ls()[!(ls() %in% c("msOcc_l", "Spp_ordered"))])
+rm(list = ls()[!(ls() %in% c())])
+msOcc_l <- readRDS("Rdata/msOcc_l_season.rds")
 
 ## Load data
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
@@ -44,118 +35,15 @@ Pc_locs_dc_sf <- st_read(
 ) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
 
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
+source("Scripts/spOcc_fns.R")
 
 # NOTES:
 # 1) Requires unique spatial coordinates, so I added a small jitter (.001)
 # 2) Does not allow NAs in occurrence (site) covs
 
-# Define functions --------------------------------------------------------
-# Extract parameter estimates and estimates of gof (ESS, rhat) from model list
-
-extract_parms <- function(model, spatial = FALSE, ms = FALSE){
-  
-  beta <- tidyMCMC(model$beta.samples) %>% mutate(parameter = "Beta")
-  alpha <- tidyMCMC(model$alpha.samples) %>% mutate(parameter = "Alpha")
-  
-  theta <- NULL
-  if(spatial && !is.null(model$theta.samples)){
-    theta <- tidyMCMC(model$theta.samples) %>% mutate(parameter = "Theta")
-  }
-  
-  pars <- bind_rows(beta, alpha, theta)
-  
-  diag_tbl <- tibble(
-    ess = c(model$ESS$beta, model$ESS$alpha, if(spatial) model$ESS$theta else NULL),
-    rhat = c(model$rhat$beta, model$rhat$alpha, if(spatial) model$rhat$theta else NULL)
-  )
-  parms_df <- bind_cols(pars, diag_tbl)
-  
-  if(ms){
-    parms_df <- parms_df %>% mutate(
-      Species_num = str_split_i(term, "-", 2),
-      Species_num = str_remove(Species_num, "sp"),
-      term = str_split_i(term, "-", 1), 
-      Species_num = ifelse(term == "phi", paste0("factor", Species_num), Species_num)
-    ) %>% relocate(Species_num, .before = term)
-  }
-  return(parms_df)
-}
-
-# Rhat and effective sample size
-plot_diagnostics <- function(parms_df){
-  parms_df %>%
-    ggplot(aes(ess, rhat, color = term, shape = parameter)) +
-    geom_point() +
-    geom_hline(yintercept = 1.1) +
-    geom_vline(xintercept = 100) +
-    guides(color = "none")
-}
-
-plot_species_diagnostics <- function(parms_df){
-  parms_df %>%
-    pivot_longer(cols = c(ess, rhat), names_to = "diagnostic") %>%
-    ggplot(aes(species_ayerbe, value, color = term, shape = parameter)) +
-    geom_point(position = "jitter") +
-    facet_wrap(~diagnostic, scales = "free_y") +
-    guides(color = "none") +
-    theme(axis.text.x = element_text(angle = 60, hjust = 1))
-}
-
-## Bayesian p-value
-# Function taking posterior predictive check object and calculating bayesian p-value
-calc_bayes_p <- function(ppc_obj){
-  fit_stat <- ppc_obj$fit.stat
-  group <- ifelse(ppc_obj$group == 1, "Site", "Replicate")
-  
-  tot.post <- ppc_obj$n.chains * ppc_obj$n.post
-  bayes_p <- sum(ppc_obj$fit.y.rep > ppc_obj$fit.y) / tot.post
-  bayes_p <- round(bayes_p, 3)
-  tibble(fit_stat, group, bayes_p)
-}
-
-## GOF tests
-# Run posterior predictive checks in spOccupancy
-run_ppc <- function(mod){
-  list(
-    ppcOcc(mod, "freeman-tukey", 1),
-    ppcOcc(mod, "freeman-tukey", 2),
-    ppcOcc(mod, "chi-squared", 1),
-    ppcOcc(mod, "chi-squared", 2)
-  )
-}
-
-extract_gof <- function(ppc_list){
-  imap(ppc_list, ~ map(.x, calc_bayes_p) %>%
-         bind_rows() %>%
-         mutate(species_ayerbe = .y)) %>%
-    bind_rows()
-}
-
-# Visualize
-plot_gof <- function(gof_tbl){
-  gof_tbl %>%
-    ggplot(aes(species_ayerbe, bayes_p, shape = group)) +
-    geom_boxplot(position = position_dodge(.7)) +
-    geom_point(aes(color = fit_stat), position = position_dodge(.7)) +
-    geom_hline(yintercept = c(0.5, 0.1), linetype = "dashed") +
-    theme(axis.text.x = element_text(angle = 60, hjust = 1),
-          legend.position = "top")
-}
-
-plot_parm_estimates <- function(parms_df, ms = FALSE){
-  parms_df <- parms_df %>%
-    mutate(UCL = estimate + 1.96 * std.error,
-           LCL = estimate - 1.96 * std.error)
-  p <- ggplot(data = parms_df, aes(x = species_ayerbe, y = estimate, color = term))
-  if(ms){ 
-    p <- ggplot(data = parms_df, aes(x = Species, y = estimate, color = term))
-  }
-  p + geom_point(position = position_dodge(.7)) +
-    geom_errorbar(position = position_dodge(.7), aes(ymin = LCL, ymax = UCL)) +
-    geom_hline(yintercept = 0, linetype = "dashed") +
-    theme(axis.text.x = element_text(angle = 60, hjust = 1), 
-          legend.position = "top") 
-}
+# Row identifier ----------------------------------------------------------
+#NOTE:: The unique row identifier  [e.g. ID x Year] is critical , this defines what a row is in your dataframes and how many rows each dataframe will have 
+Row_identifier <- c("Id_muestreo", "Ano_grp", "Season") #, "Season"
 
 # Non-spatial -----------------------------------------------------------
 occ.formula <- as.formula("~ Ecoregion + Habitat + Ano1 + Canopy_cover + Tot_prec + te + ssp + (1 | Id_group_no_dc)") 
@@ -324,22 +212,19 @@ lambda.inits[lower.tri(lambda.inits)] <- rnorm(n = N_to_fill, mean = 0, sd = 1)
 # Default initial values for lambda.
 lambda.inits
 
-parallel::detectCores()
-start <- Sys.time()
-
 ## Run multi-species model accounting for spatial autocorrelation, detection, and biogeographic clipping
 # The function svcMsPGOcc takes range.ind as an argument. range.ind is a matrix with rows corresponding to species and columns corresponding to sites, with each element taking value 1 if that site is within the range of the corresponding species and 0 if it is outside of the range.
 
 # >Run mod ----------------------------------------------------------------
 ## Model paramaters
-n.batch <- 400
+n.batch <- 200
 batch.length <- 25
 n.chains <- 3
 Samples_per_chain <- n.batch * batch.length # Total number of samples 
 
 # We throw away much of the MCMC work 
-n.burn <- 5000 
-n.thin <- 10
+n.burn <- 3000 
+n.thin <- 4
 
 # Total samples per chain - burn in per chain
 Keep_per_chain <- (Samples_per_chain - n.burn) / n.thin 
@@ -347,7 +232,9 @@ Keep_per_chain <- (Samples_per_chain - n.burn) / n.thin
 Tot_samples <- Keep_per_chain * n.chains
 Tot_samples
 
-ms_100_thin_burn <- svcMsPGOcc(
+# dim(msOcc_l$y)
+start <- Sys.time()
+ms_100_season <- svcMsPGOcc(
   occ.formula = occ.formula, 
   det.formula = det.formula, 
   data = msOcc_l, 
@@ -356,11 +243,11 @@ ms_100_thin_burn <- svcMsPGOcc(
   batch.length = batch.length, 
   accept.rate = 0.43, 
   priors = priors, 
-  n.factors = n.factors,
+  n.factors = n.factors, # n.factors,
   svc.cols = 1,
   # model changes the tuning values after each batch of the MCMC to yield acceptance rates that are close to our target acceptance rate
   tuning = list(phi = 2), 
-  n.omp.threads = 4, 
+  n.omp.threads = 1, 
   verbose = TRUE, 
   n.report = 100, 
   n.burn = n.burn, 
@@ -373,7 +260,7 @@ ms_100_thin_burn <- svcMsPGOcc(
 )
 end <- Sys.time()
 end - start
-Occ_mod <- ms_100_thin_burn
+Occ_mod <- ms_100_season
 
 # Expected log pointwise predictive density (elpd), the effective number of parameters (pD), waic is the sum of the waic values for each species 
 waic_spp <- waicOcc(Occ_mod) 
@@ -396,9 +283,11 @@ parms_df %>% plot_diagnostics()
 Prob_parms <- parms_df %>% 
   filter(rhat > 1.1 | ess < 100) %>% 
   arrange(desc(rhat))
-Prob_parms
 Prob_parms %>% filter(str_detect(term, "Ecoregion")) 
 Prob_parms %>% tabyl(parameter, term)
+
+# Proportion of parameters that are problematic
+round(nrow(Prob_parms) / nrow(parms_df), 2) # 12%
 
 # >>Goodness of fit ------------------------------------------------------
 ## Need to reduce the number of posterior samples for GOF check
@@ -510,7 +399,6 @@ draws_alpha %>%
 
 # Can play with bayesplot::mcmc_dens() function as well, or as.data.frame() to get posterior draws 
 
-
 # >z samples --------------------------------------------------------------
 
 # When subsetting the array... rows (posterior samples), columns (species), matrix slice (sites x year_grp)
@@ -525,7 +413,7 @@ richness_tbl <- Occ_mod$z.samples %>%
   apply(c(1,3), sum) %>%
   as_tibble()
 occ.covs2 <- msOcc_l$occ.covs %>% 
-  mutate(Id_muestreo_ano = paste(Id_muestreo, Ano_grp, sep = ".")) 
+  unite(Id_muestreo_ano, all_of(Row_identifier), sep = ".", remove = FALSE) 
 Id_muestreo_ano <- occ.covs2 %>% pull(Id_muestreo_ano)
 richness_tbl %>% 
   rename_with(.cols = everything(), ~ Id_muestreo_ano) %>%
@@ -534,7 +422,7 @@ richness_tbl %>%
   left_join(occ.covs2[,c("Id_muestreo_ano", "Habitat")]) %>%
   ggplot() +
   geom_density(aes(x = richness, color = Habitat, group = Id_muestreo_ano), #
-               alpha = .05)
+               alpha = .02)
 
 # >Effective spatial range ------------------------------------------------
 # Examine the estimated effective spatial ranges
