@@ -23,16 +23,23 @@ Excels <- "Derived/Excels/"
 ## NOTE: Removing Hatico points until can digitize
 Hatico_pc_nums <- str_pad(1:12, width = 2, pad = 0)
 
-Pc_locs_dc_sf <- st_read(
-  paste0(Wrangling_repo, "Derived_geospatial/shp/Pc_locs_dc.gpkg")
-) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
+Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv"))
+Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>% 
+  filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>% 
+  left_join(Site_covs[,c("Id_muestreo_no_dc", "Ecoregion", "Nombre_finca")]) %>% 
+  filter(Nombre_institucion != "Cipav")
+
+# Use semi_join to subset relevant point counts
+Site_covs <- Site_covs %>% semi_join(Event_covs)
 Bird_pcs_analysis <- read_csv(
   paste0(Wrangling_repo, Excels, "Bird_pcs/Bird_pcs_analysis.csv")
-) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
-Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>% 
-  filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
-Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv")) %>% 
-  filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
+) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>%
+  semi_join(Event_covs)
+Pc_locs_dc_sf <- st_read(
+  paste0(Wrangling_repo, "Derived_geospatial/shp/Pc_locs_dc.gpkg")
+) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>% 
+  semi_join(Site_covs) #%>% 
+#filter(Nombre_institucion != "Cipav" & Ecoregion == "Piedemonte")
 Ft <- read_csv(paste0(Wrangling_repo, Excels, "Functional_traits.csv"))
 
 # Remove these points 
@@ -41,7 +48,9 @@ Ft <- read_csv(paste0(Wrangling_repo, Excels, "Functional_traits.csv"))
 #Bird_pcs_analysis <- Bird_pcs_analysis %>% anti_join(aj_tbl)
 
 # Breeding records matrix from Moreno-palacios
-Breed_records <- read_csv("../Datasets_external/Palacios_breeding_database.csv") %>% 
+Breed_records <- read_csv(
+  "../Datasets_external/Palacios_breeding_database.csv"
+  ) %>% 
   mutate(across(where(is.character), as.factor), 
          date = paste(year, month, day, sep = "-"),
          date = as.Date(date, format = "%Y-%m-%d"),
@@ -83,9 +92,9 @@ Ft_abu <- Bird_pcs_analysis3 %>%
   left_join(Ft)
 
 ## Set minimum number of distinct point counts which in turn sets the number of species
-Num_locs_cutoff <- 100
+Num_locs_cutoff <- 150
 Ft_abu2 <- Ft_abu %>% filter(n > Num_locs_cutoff)
-nrow(Ft_abu2) # 1 loc = 462 species, 10 = 251 species, 25 = 160, 40 = 117, 50 = 100 species, 100 = 39 species
+nrow(Ft_abu2) # 1 site = 462 species, 10 = 251 species, 25 = 160, 40 = 117, 50 = 100 species, 100 = 39 species, 175 = 14 species
 
 ## We want to find a few distinct species to place at the top of the species x site matrix. We will examine body size, habitat associations, trophic levels, and range size
 Ft_abu3 <- Ft_abu2 %>% select(
@@ -105,7 +114,7 @@ Ft_abu3 %>% ggplot() +
   geom_histogram(aes(x = Mass))
 # Select representative species - DONT CHANGE THIS ONE (WORKS)
 Order_spp <- c("Tyrannus_melancholicus", "Synallaxis_azarae", "Milvago_chimachima", "Thraupis_episcopus", "Camptostoma_obsoletum", "Volatina_jacarina", "Troglodytes_aedon", "Pitangus_sulphuratus", "Bubulcus_ibis") # Other options could include "Milvago_chimachima", "Pteroglossus_castanotis", Ortalis_garrula, Manacus_manacus, Todirostrum_cinereum,  Columbina_talpacoti, Pitangus_sulphuratus
-#Order_spp <- c("Tyrannus_melancholicus", "Synallaxis_azarae", "Bubulcus_ibis", "Troglodytes_aedon", "Volatina jacarina", "Troglodytes_aedon", "Camptostoma_obsoletum", "Columbina_talpacoti") 
+Order_meta <- c("Tyrannus_melancholicus", "Manacus manacus", "Milvago chimachima", "Pitangus sulphuratus", "Crotophaga ani") #"Troglodytes_aedon", "Camptostoma_obsoletum", "Columbina_talpacoti", "Volatina jacarina"
 Ft_abu3 %>% filter(Species_ayerbe %in% Order_spp)
 
 # Remove species under the minimum number of distinct point counts 
@@ -183,9 +192,12 @@ newdat_sites <- Sampled_sites %>%
 
 # Generate table of equivalent names between SCR ecoregions and Moreno-palacios regions
 Ecoregion_equiv <- tibble(
-  Ecoregion = unique(Site_covs$Ecoregion), 
+  Ecoregion = c("Bajo magdalena", "Boyaca santander", "Cafetera", "Rio Cesar", "Piedemonte"), 
   region = c("Caribbean", "Andes", "Andes", "Caribbean", "Orinoquia")
 )
+if(all(unique(Site_covs$Ecoregion) == "Piedemonte")){
+  Ecoregion_equiv <- Ecoregion_equiv %>% filter(Ecoregion == "Piedemonte")
+  }
 newdat_sites2 <- newdat_sites %>% left_join(Ecoregion_equiv)
 
 ## Predict the Probability of breeding using Moreno-Palacios model
@@ -213,15 +225,36 @@ Event_covs3 <- Event_covs2 %>%
   #mutate(Julian_day2 = poly(Julian_day, 2),
    #      Pc_start2 = poly(Pc_start, 2))
 
+# >Registrado_por ---------------------------------------------------------
+Event_covs4 <- Event_covs3 %>% 
+  mutate(
+    Registrado_por = ifelse(
+      Uniq_db == "Ubc mbd" & Ano_grp == "22",  
+      "Aaron Alexander Skinner, Santiago Lugo-Enciso", 
+      Registrado_por
+    ))
+Collector_team_join <- Event_covs4 %>% 
+  distinct(Uniq_db, Ano_grp, Registrado_por) %>% 
+  mutate(Team = row_number(), .by = Uniq_db) %>% 
+  # For now I just assign the NAs to a 3rd Collector_team. These will have little data so will hopefully get partially pooled towards the average. 
+  # TO DO - random sampling of categorical variable? 
+  mutate(Collector_team = paste0(Uniq_db, Team), 
+         Collector_team = ifelse(is.na(Registrado_por), "Unk", Collector_team)) %>% 
+  select(-Team)
+Event_covs5 <- Event_covs4 %>% left_join(Collector_team_join) %>%
+  mutate(Collector_team = as.factor(Collector_team),
+         Collector_team = as.numeric(Collector_team))
+#sample(unique(Event_covs5$Collector_team), size = 20)
+
 # >Format ------------------------------------------------------------------
 # Generate Obs_covs_df where each row is a unique ID [Id_muestreo, Ano_grp], each column is a site visit, and the 'Variable' column identifies which Observation covariate the row corresponds to  
 # Lengthen then widen dataframe
-Obs_covs_df <- Event_covs3 %>%
+Obs_covs_df <- Event_covs5 %>%
   mutate(across(everything(), as.character)) %>%
   pivot_longer(
     # Select detection covariates here
     cols = c(
-      Nombre_institucion, Prob_breed, Pc_start, Pc_length, Sampling_day, Forest_bin #Julian_day2, Pc_start2
+      Collector_team, Prob_breed, Pc_start, Pc_length, Sampling_day, Forest_bin #Julian_day2, Pc_start2
     ),      
     names_to = "Variable",          
     values_to = "Value"             
@@ -245,8 +278,8 @@ keys <- Obs_covs_grp %>%
 names(Obs_covs_l) <- keys
 
 # Define functions to convert type back to original type (date , time, character, etc.)
-Type_tbl <- Event_covs3 %>% 
-  select(Nombre_institucion, Prob_breed, Pc_start, Pc_length, Sampling_day, Forest_bin) %>% 
+Type_tbl <- Event_covs5 %>% 
+  select(names(Obs_covs_l)) %>% 
   map_dfr(., class) %>% 
   filter(Pc_start == "hms") %>% 
   pivot_longer(everything(), names_to = "Variable", values_to = "Type") %>% 
@@ -302,11 +335,15 @@ Abund_wide_l <- Abund_no_obs2 %>%
 Species_list <- Bird_pcs_analysis4 %>% distinct(Species_ayerbe_)
 # Join with Species_list and convert NAs to 0s
 Abund_rep_l <- map(Abund_wide_l, \(rep_df){
-  rep_df %>% select(-Rep_season) %>% 
-    right_join(Species_list) %>% 
+  df <- rep_df %>% select(-Rep_season) %>% 
+    right_join(Species_list)
     # Reorder species for more efficient estimation of latent factors
-    arrange(match(Species_ayerbe_, Order_spp)) %>%
-    mutate(across(everything(), ~replace_na(.x, 0))) %>%
+  if(all(unique(Site_covs$Ecoregion) == "Piedemonte")){
+    df <- df %>% arrange(match(Species_ayerbe_, Order_meta))
+  } else{
+    df <- df %>% arrange(match(Species_ayerbe_, Order_spp))
+  }
+    df %>% mutate(across(everything(), ~replace_na(.x, 0))) %>%
     column_to_rownames(var = "Species_ayerbe_")
   })
 
@@ -335,6 +372,7 @@ sppXsite <- dim(Abund_rep_l[[1]])
 n_replicates <- length(Abund_rep_l)
 
 Abund_array <- array(Abund_nas_ul, dim = c(sppXsite[1], sppXsite[2], n_replicates))
+rownames(Abund_array) <- rownames(Abund_rep_l$`1`)
 
 # Understand Abundance array 
 dim(Abund_array)
@@ -380,19 +418,21 @@ names(Ayerbe_mod_spp_l2) <- Species_list2$Species_ayerbe
 
 ## Leptotila verreauxi
 # NOTE that Leptotila verreauxi is NULL because it is not in the Ayerbe shapefiles
-map_vec(Ayerbe_mod_spp_l2, ~is.null(.x))
-
-# Use ebird map for Leptotila verreauxi
-whtdov_path <- ebirdst_download_status(
-  species = "Leptotila verreauxi", download_ranges = TRUE, pattern = "range_raw_9km"
+if("Leptotila verreauxi" %in% Species_list2$Species_ayerbe){
+  map_vec(Ayerbe_mod_spp_l2, ~is.null(.x))
+  
+  # Use ebird map for Leptotila verreauxi
+  whtdov_path <- ebirdst_download_status(
+    species = "Leptotila verreauxi", download_ranges = TRUE, pattern = "range_raw_9km"
   ) 
-whtdov_range <- load_ranges("whtdov", resolution = "9km", smoothed = F) %>% 
-  select(scientific_name, geom) %>% 
-  rename(Nombre = scientific_name, 
-         geometry = geom)
-# Crop to just Colombia (Not really necessary)
-whtdov_range_col <- st_crop(whtdov_range, neCol)
-Ayerbe_mod_spp_l2$`Leptotila verreauxi` <- whtdov_range_col
+  whtdov_range <- load_ranges("whtdov", resolution = "9km", smoothed = F) %>% 
+    select(scientific_name, geom) %>% 
+    rename(Nombre = scientific_name, 
+           geometry = geom)
+  # Crop to just Colombia (Not really necessary)
+  whtdov_range_col <- st_crop(whtdov_range, neCol)
+  Ayerbe_mod_spp_l2$`Leptotila verreauxi` <- whtdov_range_col
+}
 
 # Bind into single spatial object
 Ayerbe_mod_spp <- do.call(rbind, Ayerbe_mod_spp_l2) %>% st_make_valid()
@@ -456,7 +496,6 @@ msAbu_l <- list(y = Abund_array, abu.covs = Site_covs3, det.covs = Obs_covs_l2, 
 msOcc_l <- msAbu_l
 msOcc_l$y <- ifelse(msAbu_l$y > 0, 1, 0)
 names(msOcc_l)[2] <- "occ.covs"
-
 
 # Save object -------------------------------------------------------------
 
