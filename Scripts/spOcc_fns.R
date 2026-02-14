@@ -50,6 +50,17 @@ plot_species_diagnostics <- function(parms_df){
     theme(axis.text.x = element_text(angle = 60, hjust = 1))
 }
 
+## GOF tests
+# Run posterior predictive checks in spOccupancy
+run_ppc <- function(mod){
+  list(
+    ppcOcc(mod, "freeman-tukey", 1),
+    ppcOcc(mod, "freeman-tukey", 2) 
+    #ppcOcc(mod, "chi-squared", 1),
+    #ppcOcc(mod, "chi-squared", 2)
+  )
+}
+
 ## Bayesian p-value
 # Function taking posterior predictive check object and calculating bayesian p-value
 calc_bayes_p <- function(ppc_obj){
@@ -62,11 +73,7 @@ calc_bayes_p <- function(ppc_obj){
   tibble(fit_stat, group, bayes_p)
 }
 
-
-
-
-
-# WORKING for multi_species objects
+# For multi_species objects
 calc_bayes_p_ms <- function(ppc_obj){
   tot.post <- ppc_obj$n.chains * ppc_obj$n.post
   # Generate TF vector for each species (column) 
@@ -74,44 +81,10 @@ calc_bayes_p_ms <- function(ppc_obj){
   bayes_p <- round(bayes_p, 3)
   # Create tibble
   fit_stat <- ppc_obj$fit.stat
+  Species <- ppc_obj$sp.names
   group <- ifelse(ppc_obj$group == 1, "Site", "Replicate")
-  tibble(fit_stat, group, bayes_p)
+  tibble(fit_stat, group, Species, bayes_p)
 } 
-
-## SCRATCH PAD FOR PREVIOUS FUNCTION
-ppc_obj <- ms_251_ppc[[1]] 
-## Map over columns
-# Doesn't work
-map2(ppc_obj$fit.y.rep, ppc_obj$fit.y, \(fit.y.rep, fit.y){
-  sum(fit.y.rep > fit.y) / tot.post
-})
-# Should work
-map2(tibble(ppc_obj$fit.y.rep), tibble(ppc_obj$fit.y), 
-     \(fit.y.rep, fit.y){
-  sum(fit.y.rep > fit.y) / tot.post
-})
-# Does works 
-map2_dbl(
-  asplit(ppc_obj$fit.y.rep, 2),
-  asplit(ppc_obj$fit.y, 2),
-  \(yrep, y) sum(yrep > y) / tot.post
-)
-sum(ppc_obj$fit.y.rep[,1] > ppc_obj$fit.y[,1]) / tot.post # Correct for species 1 
-
-
-
-
-
-## GOF tests
-# Run posterior predictive checks in spOccupancy
-run_ppc <- function(mod){
-  list(
-    ppcOcc(mod, "freeman-tukey", 1),
-    ppcOcc(mod, "freeman-tukey", 2),
-    ppcOcc(mod, "chi-squared", 1),
-    ppcOcc(mod, "chi-squared", 2)
-  )
-}
 
 extract_gof <- function(ppc_list){
   imap(ppc_list, ~ map(.x, calc_bayes_p) %>%
