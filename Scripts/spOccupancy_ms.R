@@ -3,6 +3,7 @@
 
 # Load libraries & data ---------------------------------------------------
 library(tidyverse)
+library(janitor)
 library(readxl)
 library(sf)
 library(spOccupancy)
@@ -23,7 +24,7 @@ conflicts_prefer(dplyr::filter)
 
 # Create space by removing old models
 rm(list = ls()[!(ls() %in% c())])
-msOcc_l <- readRDS("Rdata/msOcc_l_season.rds")
+msOcc_l <- readRDS("Rdata/msOcc_l_forest_52.rds")
 str(msOcc_l)
 
 ## Load data
@@ -188,8 +189,8 @@ ggsave("Figures/alpha_post_8fac.png", bg = "white") #beta
 # Can play with bayesplot::mcmc_dens() function as well, or as.data.frame() to get posterior draws 
 
 # Spatial -----------------------------------------------------------
-if(Forest){ # Forest_typ, Departamento
-  occ.formula <- as.formula("~ Canopy_height_m + Ano1 + I(Ano1^2) + Tot_prec + Elev + (1 | Id_group_no_dc) + (1 | Ecoregion)") # te + ssp + Canopy_cover 
+if(Forest){ # Forest_typ
+  occ.formula <- as.formula("~ Canopy_height_m + Canopy_cover + Ano1 + I(Ano1^2) + Elev + (1 | Id_group_no_dc)") # (1 | Departamento_num) + (1 | Ecoregion_num) + te + ssp + Canopy_cover 
   det.formula <- as.formula("~ Pc_start + I(Pc_start^2) + Prob_breed + (1 | Collector_team_num)") #Julian_day + I(Julian_day^2)  
 } else{
   occ.formula <- as.formula("~ Habitat + te + ssp + (1 | Id_group_no_dc)") # Ecoregion
@@ -233,14 +234,14 @@ lambda.inits
 
 # >Run mod ----------------------------------------------------------------
 ## Model paramaters
-n.batch <- 400
+n.batch <- 1600
 batch.length <- 25
 n.chains <- 3
 Samples_per_chain <- n.batch * batch.length # Total number of samples 
 
 # We throw away much of the MCMC work 
-n.burn <- 6000 
-n.thin <- 8
+n.burn <- 20000
+n.thin <- 10
 
 # Total samples per chain - burn in per chain
 Keep_per_chain <- (Samples_per_chain - n.burn) / n.thin 
@@ -250,7 +251,7 @@ Tot_samples
 
 dim(msOcc_l$y)
 start <- Sys.time()
-ms_37 <- svcMsPGOcc(
+ms_52 <- svcMsPGOcc(
   occ.formula = occ.formula, 
   det.formula = det.formula, 
   data = msOcc_l, 
@@ -276,7 +277,7 @@ ms_37 <- svcMsPGOcc(
 )
 end <- Sys.time()
 end - start
-Occ_mod <- ms_37
+Occ_mod <- ms_52
 
 # Expected log pointwise predictive density (elpd), the effective number of parameters (pD), waic is the sum of the waic values for each species 
 waic_spp <- waicOcc(Occ_mod) 
@@ -404,15 +405,24 @@ Prob_sites <- diff_tbl_site %>% filter(abs(Diff.fit) > 1)
 occ.covs2 %>% semi_join(Prob_sites) %>% view()
 
 # Plot lack of fit by covariates
-Site_covs2 %>% 
+occ.covs2 %>% 
   mutate(Id_muestreo_ano = paste(Id_muestreo, Ano_grp, Season, sep = ".")) %>%
   left_join(diff_tbl_site) %>%
   #filter(Diff.fit < -1.5) %>%
   ggplot(aes(x = Uniq_db, y = Diff.fit, color = Ecoregion)) + 
+  ggplot(aes(x = Ecoregion, y = Diff.fit, color = Uniq_db)) +
   #geom_boxplot() + 
   geom_jitter(width = .1, height = .04, alpha = .5) + 
   geom_hline(yintercept = 0, linetype = "dashed") +
   labs(y = "Replicate - True Discrepancy")
+
+# By year
+occ.covs2 %>% left_join(diff_tbl_site) %>% 
+  #filter( Diff.fit < -1) %>% #Uniq_db == "Gaica mbd" &
+  distinct(Id_muestreo, Ecoregion, Ano1, Species, Diff.fit) %>% 
+  ggplot(aes(x = Ano1, y = Diff.fit, color = factor(Ecoregion))) + 
+  geom_jitter(width = .1, height = .04, alpha = .5) + 
+  geom_hline(yintercept = 0, linetype = "dashed")
 
 # Which species are problematic?
 occ.covs2 %>% left_join(diff_tbl_site) %>% 
@@ -445,7 +455,7 @@ mean(abs(z_geweke), na.rm = TRUE)
 # The flat green lines are when the intercept is fixed at zero? 
 Occ_mod$lambda.samples %>% dim()
 
-sp_fac_loadings <- colSums(Occ_mod$lambda.samples)
+sp_fac_loadings <- colMeans(Occ_mod$lambda.samples) # colMeans()???
 # Extract species and latent factor number
 species <- str_split_i(names(sp_fac_loadings), "-", 1)
 factor <- str_split_i(names(sp_fac_loadings), "-", 2)
@@ -455,6 +465,7 @@ sp_fac_tbl <- tibble(species, factor, value = sp_fac_loadings)
 sp_fac_tbl %>%
   ggplot() + geom_density(aes(x = value, color = factor))
 sp_fac_tbl %>% mutate(abs_val = abs(value)) %>% 
+  filter(abs_val != 1) %>%
   slice_max(abs_val, by = factor) 
 
 # >Inspect parm estimates -------------------------------------------------
