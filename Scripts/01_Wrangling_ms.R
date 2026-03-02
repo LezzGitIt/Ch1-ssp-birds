@@ -29,7 +29,8 @@ Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>%
   filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums))
 
 # >Subset -----------------------------------------------------------------
-Forest <- TRUE
+Forest <- FALSE
+Forest_subset <- FALSE
 
 ## Subset Event_covs, which subsets the other datasets
 if(Forest){
@@ -93,28 +94,42 @@ Bird_pcs_analysis3 <- Bird_pcs_analysis2 %>%
   left_join(date_join_spp_obs)
 
 # Species selection and ordering ----------------------------------------------
-# From spOccupancy vignette: 'Place a common species first. The first species has all of its factor loadings set to fixed values, and so it can have a large influence on the resulting interpretation on the factor loadings and latent factors... For the remaining 𝑞−1 factors, place species that you believe will show different occurrence patterns than the first species'
-# Personal - It seems that fitting widespread species results in better fit 
-
 ## Join with functional traits 
 Ft_abu <- Bird_pcs_analysis3 %>% 
   count(Species_ayerbe, sort = T) %>% 
   left_join(Ft)
 
 ## Set minimum number of distinct point counts which in turn sets the number of species
-Num_locs_cutoff <- 120
+Num_locs_cutoff <- 0
 Ft_abu2 <- Ft_abu %>% filter(n > Num_locs_cutoff)
+if(Forest_subset) {
+  Ft_abu2 <- Ft_abu2 %>% 
+    filter(Habitat %in% c("Forest", "Woodland", "Riverine")) # "Riverine"
+  # Subset non-forest species (81)
+} else if(!Forest_subset){
+  Ft_abu2 <- Ft_abu2 %>% 
+    filter(!Habitat %in% c("Forest", "Woodland", "Riverine"))
+}
 nrow(Ft_abu2) # 1 site = 462 species, 10 = 251 species, 25 = 160, 40 = 117, 50 = 100 species, 100 = 39 species, 175 (110) = 14 species
 
-## We want to find a few distinct species to place at the top of the species x site matrix. We will examine body size, habitat associations, trophic levels, and range size
+# Remove species under the minimum number of distinct point counts 
+Bird_pcs_analysis4 <- Bird_pcs_analysis3 %>% 
+  filter(Species_ayerbe %in% Ft_abu2$Species_ayerbe)
+
+# >Ordering -----------------------------------------------------------------
+# From spOccupancy vignette: 'Place a common species first. The first species has all of its factor loadings set to fixed values, and so it can have a large influence on the resulting interpretation on the factor loadings and latent factors... For the remaining 𝑞−1 factors, place species that you believe will show different occurrence patterns than the first species'
+
+## We want to find a few distinct species to place at the top of the species x site matrix. We will examine body size, habitat associations, trophic levels, and range size to select a diversity of species 
 Ft_abu3 <- Ft_abu2 %>% select(
   Species_ayerbe, n, Mass, contains(c("Habitat", "Trophic")), Range.Size
 ) %>% arrange(desc(n))
-#Ft_abu3 %>% view()
 
 # Habitat association - Forest, Shrubland, Wetland, grassland, human modified 
+Ft_abu3 %>% arrange(Habitat) %>% 
+  select(Species_ayerbe, Habitat)
 Ft_abu3 %>% count(Habitat, sort = T) %>% 
   filter(n > 1)
+
 # Trophic levels - c("Carnivore", "Herbivore", "Omnivore") # Granivore, Nectarivore
 Ft_abu3 %>% count(Trophic.Level, sort = T) 
 Ft_abu3 %>% count(Trophic.Niche, sort = T) 
@@ -122,14 +137,21 @@ Ft_abu3 %>% count(Trophic.Niche, sort = T)
 # Visualize body size
 Ft_abu3 %>% ggplot() + 
   geom_histogram(aes(x = Mass))
-# Select representative species - DONT CHANGE THIS ONE (WORKS)
-Order_spp <- c("Tyrannus_melancholicus", "Synallaxis_azarae", "Milvago_chimachima", "Thraupis_episcopus", "Camptostoma_obsoletum", "Volatina_jacarina", "Troglodytes_aedon", "Pitangus_sulphuratus", "Bubulcus_ibis") # Other options could include "Milvago_chimachima", "Pteroglossus_castanotis", Ortalis_garrula, Manacus_manacus, Todirostrum_cinereum,  Columbina_talpacoti, Pitangus_sulphuratus
-Order_meta <- c("Tyrannus_melancholicus", "Manacus_manacus", "Milvago_chimachima", "Pitangus_sulphuratus", "Crotophaga_ani") #"Troglodytes_aedon", "Camptostoma_obsoletum", "Columbina_talpacoti", "Volatina jacarina"
-Order_forest <- c("Tyrannus_melancholicus", "Rupornis_magnirostris", "Synallaxis_azarae", "Milvago_chimachima", "Pitangus_sulphuratus")
 
-# Remove species under the minimum number of distinct point counts 
-Bird_pcs_analysis4 <- Bird_pcs_analysis3 %>% 
-  filter(Species_ayerbe %in% Ft_abu2$Species_ayerbe)
+## Select species order
+Order_spp <- c("Tyrannus_melancholicus", "Synallaxis_azarae", "Milvago_chimachima", "Thraupis_episcopus", "Camptostoma_obsoletum", "Volatina_jacarina", "Troglodytes_aedon", "Pitangus_sulphuratus", "Bubulcus_ibis") # Other options could include "Milvago_chimachima", "Pteroglossus_castanotis", Ortalis_garrula, Manacus_manacus, Todirostrum_cinereum,  Columbina_talpacoti, Pitangus_sulphuratus
+Order_meta <- c("Tyrannus_melancholicus", "Manacus_manacus", "Milvago_chimachima", "Pitangus_sulphuratus", "Crotophaga_ani", "Troglodytes_aedon", "Camptostoma_obsoletum", "Columbina_talpacoti", "Volatinia_jacarina")
+Order_meta_no_forest <- c("Tyrannus_melancholicus", "Milvago_chimachima", "Pitangus_sulphuratus", "Crotophaga_ani", "Troglodytes_aedon", "Camptostoma_obsoletum", "Columbina_talpacoti", "Volatinia_jacarina")
+Order_meta_forest <- c("Rupornis_magnirostris", "Crotophaga_major", "Thraupis_palmarum", "Mesembrinibis_cayennensis", "Dendrocincla_fuliginosa", "Gymnomystax_mexicanus", "Patagioenas_cayennensis", "Pteroglossus_castanotis", "Amazona_ochrocephala") # "Cercomacroides_tyrannina", Manacus_manacus"
+Order_forest <- c("Tyrannus_melancholicus", "Synallaxis_azarae", "Ortalis_garrula", "Rupornis_magnirostris", "Piaya_cayana", "Icterus_nigrogularis", "Pitangus_sulphuratus") # Consider adding "Coragyps_atratus", "Sicalis_flaveola", "Leptotila_verreauxi", "Psarocolius_decumanus", "Ortalis_garrula", "Turdus_fuscater"
+Order_forest2 <- c("Synallaxis_azarae", "Turdus_fuscater", "Rupornis_magnirostris", "Myioborus_miniatus", "Psarocolius_decumanus", "Piaya_cayana", "Patagioenas_fasciata", "Thraupis_palmarum", "Colibri_thalassinus")
+
+# Store species with largest factor loadings from previous model fits
+spp_high_fl <- c("Coragyps_atratus", "Sicalis_flaveola")
+spp_high_fl <- c("Psarocolius_decumanus", "Pachyramphus_polychopterus", "Todirostrum_chrysocrotaphum", "Leptotila_verreauxi", "Icterus_nigrogularis", "Synallaxis_candei", "Ortalis_garrula") # Crotophaga_ani, Turdus_fuscater
+
+# Ensure names are spelled correctly and in the analysis tbl
+Order_meta_no_forest %in% Bird_pcs_analysis4$Species_ayerbe_
 
 # Site covariates ---------------------------------------------------------
 ## Covariates that are fixed for a given point count x Ano_grp combination
@@ -154,15 +176,23 @@ Site_covs2 <- Site_covs %>%
   ) %>%
   select(all_of(Row_identifier), Ano1, Id_gcs, Id_group_no_dc, Uniq_db, Departamento, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te)
 
+if(all(unique(Site_covs$Ecoregion) == "Piedemonte")){
+  Site_covs2 <- Site_covs2 %>% select(-Habitat_sub)
+}
+
 # Scale numeric values, create categorical random effects
 Site_covs3 <- Site_covs2 %>%
   mutate(across(where(is.numeric), ~ as.numeric(scale(.))), 
 # Categorical random effects have to be specified as numeric in spOccupancy
   Id_group_no_dc = as.numeric(Id_group_no_dc),
   Id_gcs = as.numeric(Id_gcs))
-if(Forest) {Site_covs3 <- Site_covs3 %>% 
-  mutate(Ecoregion = as.numeric(Ecoregion),
-         Departamento = as.numeric(Departamento)) }
+if(Forest) {
+  Site_covs3 <- Site_covs3 %>% 
+  mutate(
+    Ecoregion_num = as.numeric(Ecoregion),
+    Departamento_num = as.numeric(Departamento)
+    ) 
+}
 
 # >Rm habitat = cultivos?  -------------------------------------------------
 # There are two points with Habitat == "Cultivos". These can be removed or can be changed to "Mosaic". Here I change them to "Mosaic", which allows them to be included without biasing any of the landcovers we care more about (ssp, forest)
@@ -360,10 +390,13 @@ Abund_rep_l <- map(Abund_wide_l, \(rep_df){
   df <- rep_df %>% select(-Rep_season) %>% 
     right_join(Species_list)
     # Reorder species for more efficient estimation of latent factors
-  if(all(unique(Site_covs$Ecoregion) == "Piedemonte")){
-    df <- df %>% arrange(match(Species_ayerbe_, Order_meta))
+  if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & Forest_subset){
+    df <- df %>% arrange(match(Species_ayerbe_, Order_meta_forest))
+  }
+  else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & !Forest_subset){
+    df <- df %>% arrange(match(Species_ayerbe_, Order_meta_no_forest))
   } else if(Forest){
-    df <- df %>% arrange(match(Species_ayerbe_, Order_forest))
+    df <- df %>% arrange(match(Species_ayerbe_, Order_forest2))
   }
   else{
     df <- df %>% arrange(match(Species_ayerbe_, Order_spp))
@@ -371,8 +404,6 @@ Abund_rep_l <- map(Abund_wide_l, \(rep_df){
     df %>% mutate(across(everything(), ~replace_na(.x, 0))) %>%
     column_to_rownames(var = "Species_ayerbe_")
   })
-
-rownames(Abund_rep_l$`1`)[c(38, 14, 8, 43, 5, 6, 7)]
 
 # Any of the observation covs (start time, pc length, or date) dataframes have NAs where a given point count wasn't surveyed at a given repetition. Use this data frame to assign NAs to the abundance dataframe
 ncols_det <- ncol(Obs_covs_l$Pc_start)
@@ -441,14 +472,13 @@ Ayerbe_mod_spp_l <- map(Species_list2$Species_ayerbe, \(spp){
 Ayerbe_mod_spp_l2 <- map(Ayerbe_mod_spp_l, "result")
 names(Ayerbe_mod_spp_l2) <- Species_list2$Species_ayerbe
 
+# >Species-specific replacements ------------------------------------------
 ## Leptotila verreauxi
 # NOTE that Leptotila verreauxi is NULL because it is not in the Ayerbe shapefiles
 if("Leptotila verreauxi" %in% Species_list2$Species_ayerbe){
-  map_vec(Ayerbe_mod_spp_l2, ~is.null(.x))
-  
   # Use ebird map for Leptotila verreauxi
   #whtdov_path <- ebirdst_download_status(
- # species = "Leptotila verreauxi", download_ranges = TRUE, pattern = "range_raw_9km"
+  #species = "Leptotila verreauxi", download_ranges = TRUE, pattern = "range_raw_9km"
   #) 
   whtdov_range <- load_ranges("whtdov", resolution = "9km", smoothed = F) %>% 
     select(scientific_name, geom) %>% 
@@ -457,6 +487,20 @@ if("Leptotila verreauxi" %in% Species_list2$Species_ayerbe){
   # Crop to just Colombia (Not really necessary)
   whtdov_range_col <- st_crop(whtdov_range, neCol)
   Ayerbe_mod_spp_l2$`Leptotila verreauxi` <- whtdov_range_col
+}
+if("Accipiter bicolor" %in% Species_list2$Species_ayerbe){
+  bichaw1_range <- load_ranges("bichaw1", resolution = "9km", smoothed = F) %>% 
+    select(scientific_name, geom) %>% 
+    rename(Nombre = scientific_name, 
+           geometry = geom)
+  bichaw1_range_col <- st_crop(bichaw1_range, neCol)
+  Ayerbe_mod_spp_l2$`Accipiter bicolor` <- bichaw1_range_col
+}
+if("Machaeropterus striolatus" %in% Species_list2$Species_ayerbe){
+  Ayerbe_mod_spp_l2$`Machaeropterus striolatus` <- st_read(
+    dsn = "../Geospatial_data/Ayerbe_shapefiles_1890spp", 
+    layer = "Machaeropterus regulus"
+    )
 }
 
 # Bind into single spatial object
@@ -523,14 +567,14 @@ msOcc_l$y <- ifelse(msAbu_l$y > 0, 1, 0)
 names(msOcc_l)[2] <- "occ.covs"
 
 # Save object -------------------------------------------------------------
-
-saveRDS(msOcc_l, "Rdata/msOcc_l_season.rds")
+stop()
+saveRDS(msOcc_l, "Rdata/msOcc_l_meta_81.rds")
 
 # EXTRAS ------------------------------------------------------------------
-stop()
 
 # >Checks -----------------------------------------------------------------
 dim(msOcc_l$y) # Matches expectations? 
+rownames(msOcc_l$y)
 
 # Detection covariates should have NAs in the same locations
 Obs_na_l <- map(Obs_covs_l, \(df){
