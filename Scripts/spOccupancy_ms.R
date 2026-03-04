@@ -1,4 +1,4 @@
-## PhD birds in silvopastoral landscapes##
+## PhD birds in silvopastoral landscapes ##
 # Analysis multi-species occupancy modeling -- Occupancy modeling using package spOccupancy
 
 # Load libraries & data ---------------------------------------------------
@@ -24,8 +24,7 @@ conflicts_prefer(dplyr::filter)
 
 # Create space by removing old models
 rm(list = ls()[!(ls() %in% c())])
-msOcc_l <- readRDS("Rdata/msOcc_l_forest_52.rds")
-str(msOcc_l)
+msOcc_l <- readRDS("Rdata/msOcc_l_meta_11.rds")
 
 ## Load data
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
@@ -38,10 +37,9 @@ Pc_locs_dc_sf <- st_read(
   paste0(Wrangling_repo, "Derived_geospatial/shp/Pc_locs_dc.gpkg")
 ) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
 
-source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
 source("Scripts/spOcc_fns.R")
 
-Forest <- TRUE
+Forest <- FALSE
 
 # Row identifier ----------------------------------------------------------
 #NOTE:: The unique row identifier  [e.g. ID x Year] is critical , this defines what a row is in your dataframes and how many rows each dataframe will have 
@@ -216,7 +214,7 @@ priors <- list(beta.normal = list(mean = 0, var = 2.72),
                phi.unif = list(lower, upper))
 
 ## Initial values
-n.factors <- 4
+n.factors <- 2
 # Number of species
 N <- nrow(msOcc_l$y)
 # Initiate all lambda initial values to 0. 
@@ -251,7 +249,7 @@ Tot_samples
 
 dim(msOcc_l$y)
 start <- Sys.time()
-ms_52 <- svcMsPGOcc(
+ms_11 <- svcMsPGOcc(
   occ.formula = occ.formula, 
   det.formula = det.formula, 
   data = msOcc_l, 
@@ -277,21 +275,27 @@ ms_52 <- svcMsPGOcc(
 )
 end <- Sys.time()
 end - start
-Occ_mod <- ms_52
+Occ_mod <- ms_11
 
+# >Save model -------------------------------------------------------------
+saveRDS(Occ_mod, paste0("Rdata/Model_output/Occ_mod_", Sys.Date(), ".rds"))
+rm(list = ls()[!(ls() %in% c("msOcc_l"))])
+load("Occ_mod2026-03-02.rds")
+
+# >Diagnostics ----------------------------------------------------------------
+summary(Occ_mod)
+
+# >>Waic -----------------------------------------------------
 # Expected log pointwise predictive density (elpd), the effective number of parameters (pD), waic is the sum of the waic values for each species 
 waic_spp <- waicOcc(Occ_mod) 
 waic_spp
 stop()
 
-# >Extract parameters -----------------------------------------------------
+# >>Rhat & ess ------------------------------------------------------------
+# Extract parameters 
 parms_df <- Occ_mod %>% 
   extract_parms(spatial = TRUE, ms = TRUE)
 
-# >Diagnostics ----------------------------------------------------------------
-summary(Occ_mod)
-
-# >>Rhat & ess ------------------------------------------------------------
 # Visualize
 parms_df %>% plot_diagnostics()
 
@@ -477,7 +481,7 @@ draws_alpha <- as_draws_df(Occ_mod$alpha.comm.samples) %>%
 
 plot_half_eye <- function(df){
   df %>% 
-    filter(!str_detect(param, "\\.")) %>% # rm .iteration, .draw, and .chain
+    filter(!str_detect(param, "^\\.")) %>% # rm .iteration, .draw, and .chain
     ggplot(aes(x = value, y = param, fill = param)) +
     geom_vline(xintercept = 0, linetype = "dashed") +
     stat_halfeye(alpha = .8) +
