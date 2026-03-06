@@ -31,14 +31,6 @@ if(Forest){
     rename_with(~str_remove(., paste0(variable, "-")))
 }
 
-# Subset functional traits
-Spp <- str_replace(names(y_draws), "_", " ")
-covariates <- c("Mass", "Elev_range_final", "Range.Size")
-
-str_c(letters, collapse = ", ")
-str_c(covariates, collapsae = "")
-paste0(covariates, collapsae = " + ")
-
 # PCA of bill morph
 pca <- prcomp(data = Ft, ~ Beak.Depth + Beak.Length_Nares + Beak.Width)
 Ft$Beak_size <- pca$x[,1]
@@ -46,19 +38,26 @@ Ft$Beak_shape <- pca$x[,2]
 
 # Plot PCA
 
-
+## General format - Ensure species line up in Ft and y_draws
+Spp <- str_replace(names(y_draws), "_", " ")
 Ft_spp <- Ft %>%
   filter(Species_ayerbe %in% Spp) %>%
   rename(HWI = `Hand-Wing.Index`) %>%
-  #select(Species_ayerbe, all_of(covariates)) %>%
   mutate(Species_ayerbe = factor(Species_ayerbe, levels = Spp)) %>%
   arrange(Species_ayerbe) %>%
-# postHocLM cannot accept any missing values in covariates
-  #filter(if_all(all_of(cqovariates), ~ !is.na(.x))) %>% 
-  mutate(across(where(is.numeric), scale))
+  mutate(across(where(is.numeric), scale)) %>% 
+  select(-Species_bl) %>% 
+  distinct()
+
+# >Morphology -------------------------------------------------------------
+covariates_morph <- c("Mass", "HWI", "Tarsus.Length", "Tail.Length", "Beak_size", "Beak_shape")
+Ft_morph <- Ft_spp %>% 
+  select(Species_ayerbe, all_of(covariates_morph)) %>%
+  # postHocLM cannot accept any missing values in covariates
+  filter(if_all(all_of(covariates_morph), ~ !is.na(.x)))
 
 # Create list required by postHocLM
-postHoc_l <- list(y = y_draws, covs = Ft_spp)
+postHoc_l_morph <- list(y = y_draws, covs = Ft_morph)
 
 # >Eye --------------------------------------------------------------------
 Ft_eye <- Ft_spp %>% filter(!is.na(Eye_resid)) %>% 
@@ -69,6 +68,14 @@ y_draws_eye <- y_draws %>% select(all_of(Spp_eye))
 
 # List required by postHocLM
 postHoc_l_eye <- list(y = y_draws_eye, covs = Ft_eye)
+
+# >Life-history -----------------------------------------------------------
+covariates_lh <- c("Elev_range_final", "Range.Size", "Habitat.Density", "Migration", "Trophic.Level")
+Ft_lh <- Ft_spp %>% 
+  select(Species_ayerbe, all_of(covariates_lh)) %>%
+  # postHocLM cannot accept any missing values in covariates
+  filter(if_all(all_of(covariates_lh), ~ !is.na(.x)))
+postHoc_l_lh <- list(y = y_draws_eye, covs = Ft_lh)
 
 # >Clutch -----------------------------------------------------------------
 Ft_clutch <- Ft_spp %>% filter(!is.na(Clutch)) %>% 
@@ -83,19 +90,17 @@ postHoc_l_clutch <- list(y = y_draws_clutch, covs = Ft_clutch)
 # Run model ---------------------------------------------------------------
 ## Morphology models
 # Morph variables: Mass + HWI + Tarsus.Length + Tail.Length + Beak_size + Beak_shape
-postHoc_morph <- postHocLM(
-  formula = ~Mass , data = postHoc_l
-)
+Morph_form <- as.formula(paste("~" , paste(covariates_morph, collapse = " + ")))
+postHoc_morph <- postHocLM(formula = Morph_form , data = postHoc_l_morph)
 # Residual eye size
 postHoc_eye <- postHocLM(formula = ~Eye_resid, data = postHoc_l_eye)
 
 ## Life-history models
 # Lh vars: Range.Size + Elev_range_final + Habitat.Density + Migration + Trophic.Level
-postHoc_lh <- postHocLM(
-  formula = ~Range.Size, data = postHoc_l
-  )
+lh_form <- as.formula(paste("~" , paste(covariates_lh, collapse = " + ")))
+postHoc_lh <- postHocLM(formula = lh_form, data = postHoc_l_lh)
 # Clutch
-postHoc_clutch <- postHocLM(formula = ~Clutch, data = postHoc_l_clutch, verbose = TRUE)
+postHoc_clutch <- postHocLM(formula = ~Clutch, data = postHoc_l_clutch)
 
 # Plot --------------------------------------------------------------------
 format.for.plotting <- function(samples){
@@ -116,7 +121,6 @@ plot_half_eye <- function(df){
     theme_minimal()
 }
 
-?postHocLM
 ## Morphology
 format.for.plotting(postHoc_morph$beta.samples) %>% plot_half_eye()
 # Residual eye 
