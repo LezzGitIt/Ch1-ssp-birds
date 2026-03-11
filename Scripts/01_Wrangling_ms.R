@@ -30,7 +30,9 @@ Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>%
 
 # >Subset -----------------------------------------------------------------
 Forest <- FALSE
-Forest_subset <- FALSE
+Forest_subset <- FALSE # Just forest species? 
+All_spp <- TRUE
+Habitat_split <- TRUE # Split categorical Habitat variable? 
 
 ## Subset Event_covs, which subsets the other datasets
 if(Forest){
@@ -56,7 +58,7 @@ Pc_locs_dc_sf <- st_read(
 ) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>% 
   semi_join(Site_covs) #%>% 
 #filter(Nombre_institucion != "Cipav" & Ecoregion == "Piedemonte")
-Ft <- read_csv(paste0(Wrangling_repo, Excels, "Functional_traits.csv"))
+Ft <- read_csv(paste0(Wrangling_repo, Excels, "Traits/Functional_traits.csv"))
 
 # Breeding records matrix from Moreno-palacios
 Breed_records <- read_csv(
@@ -101,16 +103,18 @@ Ft_abu <- Bird_pcs_analysis3 %>%
 
 ## Set minimum number of distinct point counts which in turn sets the number of species
 Num_locs_cutoff <- 0
-Ft_abu2 <- Ft_abu %>% filter(n > Num_locs_cutoff)
+Ft_abu2 <- Ft_abu %>% filter(n >= Num_locs_cutoff)
 if(Forest_subset) {
   Ft_abu2 <- Ft_abu2 %>% 
     filter(Habitat %in% c("Forest", "Woodland", "Riverine")) # "Riverine"
   # Subset non-forest species (81)
+} else if(All_spp){
+  Ft_abu2
 } else if(!Forest_subset){
   Ft_abu2 <- Ft_abu2 %>% 
     filter(!Habitat %in% c("Forest", "Woodland", "Riverine"))
 }
-nrow(Ft_abu2) # 1 site = 462 species, 10 = 251 species, 25 = 160, 40 = 117, 50 = 100 species, 100 = 39 species, 175 (110) = 14 species
+nrow(Ft_abu2)
 
 # Remove species under the minimum number of distinct point counts 
 Bird_pcs_analysis4 <- Bird_pcs_analysis3 %>% 
@@ -126,7 +130,7 @@ Ft_abu3 <- Ft_abu2 %>% select(
 
 # Habitat association - Forest, Shrubland, Wetland, grassland, human modified 
 Ft_abu3 %>% arrange(Habitat) %>% 
-  select(Species_ayerbe, Habitat)
+  select(Species_ayerbe, Habitat) #%>% view()
 Ft_abu3 %>% count(Habitat, sort = T) %>% 
   filter(n > 1)
 
@@ -156,7 +160,7 @@ Order_meta_no_forest %in% Bird_pcs_analysis4$Species_ayerbe_
 # Site covariates ---------------------------------------------------------
 ## Covariates that are fixed for a given point count x Ano_grp combination
 date_join_ano <- Event_covs %>% 
-  distinct(Id_muestreo_no_dc, across(all_of(Row_identifier)), Ano, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te)
+  distinct(Id_muestreo_no_dc, across(all_of(Row_identifier)), Ano, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
 Site_covs2 <- Site_covs %>%
   full_join(date_join_ano) %>% 
   # Change these two points to "Mosaic". This allows them to be included without biasing any of the landcovers we care more about (ssp, forest)
@@ -171,13 +175,22 @@ Site_covs2 <- Site_covs %>%
     # Take the earlier of the two years so it is numeric
     Ano1 = as.numeric(str_split_i(Ano_grp, "-", 1)),
     across(where(is.character), as.factor),
-    Habitat = fct_relevel(Habitat, c("Mosaic", "Pastizales", "Ssp", "Bosque")), #"Bosque ripario"
     Ecoregion = relevel(Ecoregion, ref = "Piedemonte")
   ) %>%
-  select(all_of(Row_identifier), Ano1, Id_gcs, Id_group_no_dc, Uniq_db, Departamento, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te)
+  select(all_of(Row_identifier), Ano1, Id_gcs, Id_group_no_dc, Uniq_db, Departamento, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
+
+if(Habitat_split){
+  Site_covs2 <- Site_covs2 %>% 
+    mutate(Habitat = case_when(
+      Habitat_sub == "Ripario" ~ "Bosque ripario", 
+      Habitat == "Ssp" ~ paste0(Habitat, "-", Habitat_sub), 
+      .default = Habitat
+    ))
+}
 
 if(all(unique(Site_covs$Ecoregion) == "Piedemonte")){
-  Site_covs2 <- Site_covs2 %>% select(-Habitat_sub)
+  Site_covs2 <- Site_covs2 %>% select(-Habitat_sub) %>% 
+    mutate(Habitat = fct_relevel(Habitat, c("Mosaic", "Pastizales", "Ssp", "Bosque"))) #"Bosque ripario")
 }
 
 # Scale numeric values, create categorical random effects
@@ -283,7 +296,7 @@ Collector_team_join <- Event_covs4 %>%
   # For now I just assign the NAs to a 3rd Collector_team. These will have little data so will hopefully get partially pooled towards the average. 
   # TO DO - Consider random sampling of categorical variable instead of assigning to "Unk"
   mutate(Collector_team = paste0(Uniq_db, Team), 
-         Collector_team = ifelse(is.na(Registrado_por), "Unk", Collector_team), 
+         Collector_team = ifelse(is.na(Registrado_por), "Unk", Collector_team),
          Collector_team_num = row_number()) %>%
   select(-Team) %>% 
   mutate(Collector_team_num = first(Collector_team_num), .by = Collector_team)
@@ -392,8 +405,9 @@ Abund_rep_l <- map(Abund_wide_l, \(rep_df){
     # Reorder species for more efficient estimation of latent factors
   if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & Forest_subset){
     df <- df %>% arrange(match(Species_ayerbe_, Order_meta_forest))
-  }
-  else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & !Forest_subset){
+  } else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & All_spp){
+    df <- df %>% arrange(match(Species_ayerbe_, Order_meta))
+  }   else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & !Forest_subset){
     df <- df %>% arrange(match(Species_ayerbe_, Order_meta_no_forest))
   } else if(Forest){
     df <- df %>% arrange(match(Species_ayerbe_, Order_forest2))
@@ -473,10 +487,9 @@ Ayerbe_mod_spp_l2 <- map(Ayerbe_mod_spp_l, "result")
 names(Ayerbe_mod_spp_l2) <- Species_list2$Species_ayerbe
 
 # >Species-specific replacements ------------------------------------------
-## Leptotila verreauxi
+# Use ebird or BirdLife maps when they don't exist in the Ayerbe shapefiles
 # NOTE that Leptotila verreauxi is NULL because it is not in the Ayerbe shapefiles
 if("Leptotila verreauxi" %in% Species_list2$Species_ayerbe){
-  # Use ebird map for Leptotila verreauxi
   #whtdov_path <- ebirdst_download_status(
   #species = "Leptotila verreauxi", download_ranges = TRUE, pattern = "range_raw_9km"
   #) 
@@ -495,6 +508,15 @@ if("Accipiter bicolor" %in% Species_list2$Species_ayerbe){
            geometry = geom)
   bichaw1_range_col <- st_crop(bichaw1_range, neCol)
   Ayerbe_mod_spp_l2$`Accipiter bicolor` <- bichaw1_range_col
+}
+# Thripadectes_virgaticeps range map from BirdLife International
+if("Thripadectes virgaticeps" %in% Species_list2$Species_ayerbe){
+  Thripadectes_virgaticeps_sf <- st_read(
+    "../Geospatial_data/Thripadectes_virgaticeps", 
+    layer = "SppDataRequest"
+    )
+  Thripadectes_virgaticeps_sf_col <- st_crop(Thripadectes_virgaticeps_sf, neCol)
+  Ayerbe_mod_spp_l2$`Thripadectes virgaticeps` <- Thripadectes_virgaticeps_sf_col 
 }
 if("Machaeropterus striolatus" %in% Species_list2$Species_ayerbe){
   Ayerbe_mod_spp_l2$`Machaeropterus striolatus` <- st_read(
@@ -568,12 +590,12 @@ names(msOcc_l)[2] <- "occ.covs"
 
 # Save object -------------------------------------------------------------
 stop()
-saveRDS(msOcc_l, "Rdata/msOcc_l_meta_81.rds")
+saveRDS(msOcc_l, "Rdata/msOcc_l_meta_271_habitat_split_samples.rds")
 
 # EXTRAS ------------------------------------------------------------------
 
 # >Checks -----------------------------------------------------------------
-dim(msOcc_l$y) # Matches expectations? 
+dim(msOcc_l$y)
 rownames(msOcc_l$y)
 
 # Detection covariates should have NAs in the same locations
