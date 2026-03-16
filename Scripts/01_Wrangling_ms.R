@@ -72,6 +72,13 @@ Breed_records <- read_csv(
 load(paste0(Wrangling_repo, "Rdata/NE_layers_Colombia.Rdata")) 
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
 
+# Plot precipitation within Meta 
+library(tidyterra)
+Site_covs_vec <- Site_covs %>% terra::vect(geom=c("Long", "Lat")) %>% 
+  filter(Ecoregion == "Piedemonte") 
+ggplot(data = Site_covs_vec, aes(color = Tot_prec)) +
+  geom_spatvector()
+
 # Row identifier ----------------------------------------------------------
 Event_covs %>% 
   select(Id_muestreo, Ano_grp, N_samp_periods, Season, 
@@ -99,47 +106,76 @@ Bird_pcs_analysis3 <- Bird_pcs_analysis2 %>%
 ## Join with functional traits 
 Ft_abu <- Bird_pcs_analysis3 %>% 
   count(Species_ayerbe, sort = T) %>% 
-  left_join(Ft)
+  left_join(Ft) %>%
+# Create habitat type, forest vs non-forest
+  mutate(Habitat2 = if_else(
+  Habitat %in% c("Forest", "Woodland", "Riverine"), "Forest", "Non-forest"
+))
 
 ## Set minimum number of distinct point counts which in turn sets the number of species
 Num_locs_cutoff <- 0
-Ft_abu2 <- Ft_abu %>% filter(n >= Num_locs_cutoff)
+Ft_abu2 <- Ft_abu %>% mutate(In_out = if_else(n >= Num_locs_cutoff, "In", "Out"))
+Ft_abu3 <- Ft_abu2 %>% filter(In_out == "In")
+
 if(Forest_subset) {
-  Ft_abu2 <- Ft_abu2 %>% 
+  Ft_abu3 <- Ft_abu3 %>% 
     filter(Habitat %in% c("Forest", "Woodland", "Riverine")) # "Riverine"
   # Subset non-forest species (81)
 } else if(All_spp){
-  Ft_abu2
+  Ft_abu3
 } else if(!Forest_subset){
-  Ft_abu2 <- Ft_abu2 %>% 
+  Ft_abu3 <- Ft_abu3 %>% 
     filter(!Habitat %in% c("Forest", "Woodland", "Riverine"))
 }
-nrow(Ft_abu2)
+nrow(Ft_abu3)
+
+In_out_compare_plot <- function(var){
+  Ft_abu2 %>% 
+    count(In_out, {{ var }}) %>% 
+    group_by(In_out) %>% 
+    mutate(label = scales::percent(n / sum(n))) %>% 
+    ggplot(aes(x = In_out, y = n, fill = {{ var }})) +
+    geom_bar(stat = "identity", position = "fill") +
+    geom_text(aes(label = label),
+              position = position_fill(vjust = 0.5),
+              color = "white") +
+    scale_y_continuous(labels = scales::percent)
+}
+In_out_compare_plot(Trophic.Niche)
+In_out_compare_plot(Trophic.Level)
+In_out_compare_plot(Habitat2)
+
+Ft_abu %>% anti_join(Ft_abu2) %>% 
+  tabyl(Trophic.Niche) #Trophic.Level
+  #pull(Species_ayerbe)
+Ft_abu2 %>% #tabyl(Trophic.Level)
+  tabyl(Trophic.Niche)
+  #pull(Species_ayerbe)
 
 # Remove species under the minimum number of distinct point counts 
 Bird_pcs_analysis4 <- Bird_pcs_analysis3 %>% 
-  filter(Species_ayerbe %in% Ft_abu2$Species_ayerbe)
+  filter(Species_ayerbe %in% Ft_abu3$Species_ayerbe)
 
 # >Ordering -----------------------------------------------------------------
 # From spOccupancy vignette: 'Place a common species first. The first species has all of its factor loadings set to fixed values, and so it can have a large influence on the resulting interpretation on the factor loadings and latent factors... For the remaining 𝑞−1 factors, place species that you believe will show different occurrence patterns than the first species'
 
 ## We want to find a few distinct species to place at the top of the species x site matrix. We will examine body size, habitat associations, trophic levels, and range size to select a diversity of species 
-Ft_abu3 <- Ft_abu2 %>% select(
+Ft_abu4 <- Ft_abu3 %>% select(
   Species_ayerbe, n, Mass, contains(c("Habitat", "Trophic")), Range.Size
 ) %>% arrange(desc(n))
 
 # Habitat association - Forest, Shrubland, Wetland, grassland, human modified 
-Ft_abu3 %>% arrange(Habitat) %>% 
+Ft_abu4 %>% arrange(Habitat) %>% 
   select(Species_ayerbe, Habitat) #%>% view()
-Ft_abu3 %>% count(Habitat, sort = T) %>% 
+Ft_abu4 %>% count(Habitat, sort = T) %>% 
   filter(n > 1)
 
 # Trophic levels - c("Carnivore", "Herbivore", "Omnivore") # Granivore, Nectarivore
-Ft_abu3 %>% count(Trophic.Level, sort = T) 
-Ft_abu3 %>% count(Trophic.Niche, sort = T) 
+Ft_abu4 %>% count(Trophic.Level, sort = T) 
+Ft_abu4 %>% count(Trophic.Niche, sort = T) 
 
 # Visualize body size
-Ft_abu3 %>% ggplot() + 
+Ft_abu4 %>% ggplot() + 
   geom_histogram(aes(x = Mass))
 
 ## Select species order
@@ -308,15 +344,19 @@ Event_covs5 %>% distinct(Uniq_db, Collector_team_num)
 
 # >Format ------------------------------------------------------------------
 # Generate Obs_covs_df where each row is a unique ID [Id_muestreo, Ano_grp], each column is a site visit, and the 'Variable' column identifies which Observation covariate the row corresponds to  
-# Lengthen then widen dataframe
-Obs_covs_df <- Event_covs5 %>%
+# Final touches, scale
+Event_covs6 <- Event_covs5 %>%
   mutate(Rep_season = as.factor(Rep_season), 
-         across(where(~ is.numeric(.) | inherits(., "hms")), ~ scale(.))) %>% 
-  mutate(across(everything(), as.character)) %>%
+         Sampling_day_log = log(Sampling_day))
+
+# Lengthen then widen dataframe
+Obs_covs_df <- Event_covs6 %>%
+  mutate(across(where(~ is.numeric(.) | inherits(., "hms")), ~ scale(.)),
+  across(everything(), as.character)) %>%
   pivot_longer(
     # Select detection covariates here
     cols = c(
-      Collector_team_num, Julian_day, Prob_breed, Pc_start, Pc_length, Sampling_day, Forest_bin #Julian_day2, Pc_start2
+      Collector_team_num, Julian_day, Prob_breed, Pc_start, Pc_length, Sampling_day_log, Forest_bin #Julian_day2, Pc_start2
     ),      
     names_to = "Variable",          
     values_to = "Value"             
@@ -340,7 +380,7 @@ keys <- Obs_covs_grp %>%
 names(Obs_covs_l) <- keys
 
 # Define functions to convert type back to original type (date , time, character, etc.)
-Type_tbl <- Event_covs5 %>% 
+Type_tbl <- Event_covs6 %>% 
   select(names(Obs_covs_l)) %>% 
   map_dfr(., class) %>% 
   filter(Pc_start == "hms") %>%
@@ -396,53 +436,114 @@ Abund_wide_l <- Abund_no_obs2 %>%
   ) %>%
   split(.$Rep_season)
 
+if(FALSE){
+
+map(Abund_wide_l, \(rep_df){
+  select(-Rep_season) %>%
+  right_join(Species_list) 
+})
+  reorder_species(Order_meta) %>% 
+  pull(order_key)
+  filter(Species_ayerbe_ == "Glaucis_hirsutus") %>%
+  mutate(across(everything(), ~replace_na(.x, 0))) %>%
+  column_to_rownames(var = "Species_ayerbe_") %>% 
+  rowSums(na.rm = TRUE)
+  
+  
+# WORKING 
+
+  Abund_wide_l[[1]] %>%
+    select(-Rep_season) %>%
+    right_join(Species_list) 
+    arrange(match(Species_ayerbe_, Order_meta_no_forest)) %>% 
+    pull(Species_ayerbe_)
+    
+}
+
 # Generate a species list so that each replicate tbl (1-5) will have the full species list
 Species_list <- Bird_pcs_analysis4 %>% distinct(Species_ayerbe_)
+
+reorder.species <- function(Order_vec){
+  Species_list %>% 
+    arrange(match(Species_ayerbe_, {{ Order_vec }})) %>% 
+    pull(Species_ayerbe_)
+}
+
+# Reorder species for more efficient estimation of latent factors
+if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & Forest_subset){
+  Spp_order <- reorder.species(Order_meta_forest)
+} else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & All_spp){
+  Spp_order <- reorder.species(Order_meta)
+}   else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & !Forest_subset){
+  Spp_order <- reorder.species(Order_meta_no_forest)
+} else if(Forest){
+  Spp_order <- reorder.species(Order_forest2)
+} else{
+  Spp_order <- reorder.species(Order_spp)
+}
+
 # Join with Species_list and convert NAs to 0s
 Abund_rep_l <- map(Abund_wide_l, \(rep_df){
-  df <- rep_df %>% select(-Rep_season) %>% 
-    right_join(Species_list)
-    # Reorder species for more efficient estimation of latent factors
-  if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & Forest_subset){
-    df <- df %>% arrange(match(Species_ayerbe_, Order_meta_forest))
-  } else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & All_spp){
-    df <- df %>% arrange(match(Species_ayerbe_, Order_meta))
-  }   else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & !Forest_subset){
-    df <- df %>% arrange(match(Species_ayerbe_, Order_meta_no_forest))
-  } else if(Forest){
-    df <- df %>% arrange(match(Species_ayerbe_, Order_forest2))
-  }
-  else{
-    df <- df %>% arrange(match(Species_ayerbe_, Order_spp))
-  }
-    df %>% mutate(across(everything(), ~replace_na(.x, 0))) %>%
+  df <- rep_df %>%
+    select(-Rep_season) %>%
+    right_join(Species_list) %>% 
+    arrange(match(Species_ayerbe_, Spp_order)) %>% 
+    mutate(across(everything(), ~replace_na(.x, 0))) %>%
     column_to_rownames(var = "Species_ayerbe_")
-  })
+})
 
 # Any of the observation covs (start time, pc length, or date) dataframes have NAs where a given point count wasn't surveyed at a given repetition. Use this data frame to assign NAs to the abundance dataframe
 ncols_det <- ncol(Obs_covs_l$Pc_start)
 start_det_cols <- length(Row_identifier) + 1
 
 TF_mat <- !is.na(Obs_covs_l$Pc_start[,start_det_cols:ncols_det])  #659 rows
+str(Obs_covs_l$Pc_start)
+
+### Check from postiron
+spp <- c("Glaucis_hirsutus", "Ardea_alba", "Eudocimus_ruber")
+
+# Check alignment between detection covs and abundance columns
+det_cols <- colnames(Obs_covs_l$Pc_start)[start_det_cols:ncols_det]
+abu_cols <- colnames(Abund_rep_l[[1]])
+all(det_cols == abu_cols)
+
+# Compare counts before/after masking
+diag_tbl <- map_dfr(seq_along(Abund_rep_l), \(i){
+  tbl <- Abund_rep_l[[i]]
+  keep <- TF_mat[, i]
+  tibble(
+    rep = i,
+    species = spp,
+    nonzero_pre = sapply(spp, \(s) sum(tbl[s, ], na.rm = TRUE)),
+    nonzero_kept = sapply(spp, \(s) sum(tbl[s, keep], na.rm = TRUE)),
+    nonzero_masked = sapply(spp, \(s) sum(tbl[s, !keep], na.rm = TRUE))
+  )
+})
+diag_tbl
+## Remove
 
 Abund_nas <- map(seq_along(Abund_rep_l), \(replicate){
   
-  tbl <- Abund_rep_l[[replicate]]      # species × sites
+  mat <- as.matrix(Abund_rep_l[[replicate]])   # species × sites
   keep <- TF_mat[, replicate]     # length = sites
   
-  tbl[, !keep] <- NA
-  tbl
+  mat[, !keep] <- NA
+  mat
 })
+Abund_array <- simplify2array(Abund_nas)
+dim(Abund_array)
 
-# Turn list (each slot is a replicate) into an array (each matrix slice is a replicate)
-Abund_nas_ul <- unlist(Abund_nas)
-
-# Ordering of unlist -> array requires filling the array by species, sites, and then replicates
-sppXsite <- dim(Abund_rep_l[[1]])
-n_replicates <- length(Abund_rep_l)
-
-Abund_array <- array(Abund_nas_ul, dim = c(sppXsite[1], sppXsite[2], n_replicates))
-rownames(Abund_array) <- rownames(Abund_rep_l$`1`)
+if(FALSE){
+  # Turn list (each slot is a replicate) into an array (each matrix slice is a replicate)
+  Abund_nas_ul <- unlist(Abund_nas)
+  
+  # Ordering of unlist -> array requires filling the array by species, sites, and then replicates
+  sppXsite <- dim(Abund_rep_l[[1]])
+  n_replicates <- length(Abund_rep_l)
+  
+  Abund_array <- array(Abund_nas_ul, dim = c(sppXsite[1], sppXsite[2], n_replicates))
+  rownames(Abund_array) <- rownames(Abund_rep_l$`1`)
+}
 
 # Understand Abundance array 
 dim(Abund_array)
@@ -590,7 +691,7 @@ names(msOcc_l)[2] <- "occ.covs"
 
 # Save object -------------------------------------------------------------
 stop()
-saveRDS(msOcc_l, "Rdata/msOcc_l_meta_271_habitat_split_samples.rds")
+saveRDS(msOcc_l, "Rdata/msOcc_l_meta_271_rep_fix.rds")
 
 # EXTRAS ------------------------------------------------------------------
 
@@ -622,6 +723,21 @@ table(names(Biogeo_clip) == Order_id_ano$Obs_covs_l)
 # If any problems.. Diagnose
 probs <- which(!Order_id_ano$Site_covs3 == Order_id_ano$Obs_covs_l)
 Site_covs3 %>% slice(probs) 
+
+# >Species order check ----------------------------------------------------
+# Actual observations at sites
+obs_sites <- apply(msOcc_l$y, c(1,2), max, na.rm = TRUE)
+obs_occ <- rowSums(obs_sites)
+obs_occ
+
+# Should be none
+names(obs_occ[obs_occ == 0])
+# Should be TRUE
+all(sapply(msOcc_l$y, \(x) identical(rownames(x), rownames(msOcc_l$y[[1]]))))
+
+
+
+
 
 # >Plot probability breeding ----------------------------------------------
 ## Plot in observed data
