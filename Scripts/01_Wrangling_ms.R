@@ -1,6 +1,6 @@
 ## Multi-species wrangling for spOccupancy
 
-# Load libraries & data ---------------------------------------------------
+# Load libraries ---------------------------------------------------
 ## Load libraries
 library(tidyverse)
 library(hms)
@@ -17,7 +17,7 @@ conflicts_prefer(dplyr::select)
 conflicts_prefer(dplyr::filter)
 conflicts_prefer(base::match)
 
-## Load data
+# Load data ---------------------------------------------------------------
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
 Excels <- "Derived/Excels/"
 
@@ -29,22 +29,49 @@ Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>%
   filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums))
 
 # >Subset -----------------------------------------------------------------
-Forest <- FALSE
-Forest_subset <- FALSE # Just forest species? 
-All_spp <- TRUE
-Habitat_split <- TRUE # Split categorical Habitat variable? 
+Subset_tbl <- expand_grid(
+  Pc_Habitat = c("Forest", "Gradient", "All"),
+  Spp_subset = c("Forest", "All", "Nonforest"),
+  Habitat_split = c(TRUE, FALSE)
+) %>%
+  mutate(
+    Subset_i = row_number(),
+    Spp_order = case_when(
+      Pc_Habitat == "Gradient" & Spp_subset == "Forest" ~ "Order_meta_forest",
+      Pc_Habitat == "Gradient" & Spp_subset == "All" ~ "Order_meta",
+      Pc_Habitat == "Gradient" & Spp_subset == "Nonforest" ~ "Order_meta_no_forest",
+      Pc_Habitat == "Forest" ~ "Order_forest2",
+      .default = "Order_spp"
+    )
+    # Reorder columns
+  ) %>% select(Subset_i, everything())
+Subset_tbl
+
+i <- 9 # 3, 9, 15
+Subset_cfg <- Subset_tbl %>% slice(i)
+
+Pc_Habitat_i <- Subset_cfg %>% pull(Pc_Habitat)
+Spp_subset_i <- Subset_cfg %>% pull(Spp_subset)
+Habitat_split_i <- Subset_cfg %>% pull(Habitat_split)
+Spp_order_i <- Subset_cfg %>% pull(Spp_order)
+
+Subset_cfg
 
 ## Subset Event_covs, which subsets the other datasets
-if(Forest){
+if(Pc_Habitat_i == "Forest"){
   Event_covs <- Event_covs %>% 
     left_join(Site_covs[,c("Id_muestreo_no_dc", "Habitat")]) %>% 
-    filter(Habitat == "Bosque" & Uniq_db != "Cipav mbd") %>% 
+    filter(Habitat == "Bosque") %>%  
+    #filter(Uniq_db != "Cipav mbd") %>%
     select(-Habitat)
-} else{
+} else if(Pc_Habitat_i == "Gradient"){
   Event_covs <- Event_covs %>% 
     left_join(Site_covs[,c("Id_muestreo_no_dc", "Ecoregion", "Nombre_finca")]) %>% 
-    filter(Nombre_institucion != "Cipav" & Ecoregion == "Piedemonte") #%>% 
+    filter(Ecoregion == "Piedemonte") #%>% 
+  #filter(Nombre_institucion != "Cipav")
   #filter(Pc_start < as_hms("12:00:00"))
+} else if(Pc_Habitat_i == "All"){
+  Event_covs
 }
 
 # Use semi_join to subset relevant point counts
@@ -63,7 +90,7 @@ Ft <- read_csv(paste0(Wrangling_repo, Excels, "Traits/Functional_traits.csv"))
 # Breeding records matrix from Moreno-palacios
 Breed_records <- read_csv(
   "../Datasets_external/Palacios_breeding_database.csv"
-  ) %>% 
+) %>% 
   mutate(across(where(is.character), as.factor), 
          date = paste(year, month, day, sep = "-"),
          date = as.Date(date, format = "%Y-%m-%d"),
@@ -107,23 +134,23 @@ Bird_pcs_analysis3 <- Bird_pcs_analysis2 %>%
 Ft_abu <- Bird_pcs_analysis3 %>% 
   count(Species_ayerbe, sort = T) %>% 
   left_join(Ft) %>%
-# Create habitat type, forest vs non-forest
+  # Create habitat type, forest vs non-forest
   mutate(Habitat2 = if_else(
-  Habitat %in% c("Forest", "Woodland", "Riverine"), "Forest", "Non-forest"
-))
+    Habitat %in% c("Forest", "Woodland", "Riverine"), "Forest", "Non-forest"
+  ))
 
 ## Set minimum number of distinct point counts which in turn sets the number of species
 Num_locs_cutoff <- 0
 Ft_abu2 <- Ft_abu %>% mutate(In_out = if_else(n >= Num_locs_cutoff, "In", "Out"))
 Ft_abu3 <- Ft_abu2 %>% filter(In_out == "In")
 
-if(Forest_subset) {
+if(Spp_subset_i == "Forest") {
   Ft_abu3 <- Ft_abu3 %>% 
     filter(Habitat %in% c("Forest", "Woodland", "Riverine")) # "Riverine"
   # Subset non-forest species (81)
-} else if(All_spp){
+} else if(Spp_subset_i == "All"){
   Ft_abu3
-} else if(!Forest_subset){
+} else if(Spp_subset_i == "Nonforest"){
   Ft_abu3 <- Ft_abu3 %>% 
     filter(!Habitat %in% c("Forest", "Woodland", "Riverine"))
 }
@@ -139,7 +166,8 @@ In_out_compare_plot <- function(var){
     geom_text(aes(label = label),
               position = position_fill(vjust = 0.5),
               color = "white") +
-    scale_y_continuous(labels = scales::percent)
+    scale_y_continuous(labels = scales::percent) +
+    labs(x = NULL, y = NULL)
 }
 In_out_compare_plot(Trophic.Niche)
 In_out_compare_plot(Trophic.Level)
@@ -147,10 +175,10 @@ In_out_compare_plot(Habitat2)
 
 Ft_abu %>% anti_join(Ft_abu2) %>% 
   tabyl(Trophic.Niche) #Trophic.Level
-  #pull(Species_ayerbe)
+#pull(Species_ayerbe)
 Ft_abu2 %>% #tabyl(Trophic.Level)
   tabyl(Trophic.Niche)
-  #pull(Species_ayerbe)
+#pull(Species_ayerbe)
 
 # Remove species under the minimum number of distinct point counts 
 Bird_pcs_analysis4 <- Bird_pcs_analysis3 %>% 
@@ -186,10 +214,6 @@ Order_meta_forest <- c("Rupornis_magnirostris", "Crotophaga_major", "Thraupis_pa
 Order_forest <- c("Tyrannus_melancholicus", "Synallaxis_azarae", "Ortalis_garrula", "Rupornis_magnirostris", "Piaya_cayana", "Icterus_nigrogularis", "Pitangus_sulphuratus") # Consider adding "Coragyps_atratus", "Sicalis_flaveola", "Leptotila_verreauxi", "Psarocolius_decumanus", "Ortalis_garrula", "Turdus_fuscater"
 Order_forest2 <- c("Synallaxis_azarae", "Turdus_fuscater", "Rupornis_magnirostris", "Myioborus_miniatus", "Psarocolius_decumanus", "Piaya_cayana", "Patagioenas_fasciata", "Thraupis_palmarum", "Colibri_thalassinus")
 
-# Store species with largest factor loadings from previous model fits
-spp_high_fl <- c("Coragyps_atratus", "Sicalis_flaveola")
-spp_high_fl <- c("Psarocolius_decumanus", "Pachyramphus_polychopterus", "Todirostrum_chrysocrotaphum", "Leptotila_verreauxi", "Icterus_nigrogularis", "Synallaxis_candei", "Ortalis_garrula") # Crotophaga_ani, Turdus_fuscater
-
 # Ensure names are spelled correctly and in the analysis tbl
 Order_meta_no_forest %in% Bird_pcs_analysis4$Species_ayerbe_
 
@@ -197,6 +221,7 @@ Order_meta_no_forest %in% Bird_pcs_analysis4$Species_ayerbe_
 ## Covariates that are fixed for a given point count x Ano_grp combination
 date_join_ano <- Event_covs %>% 
   distinct(Id_muestreo_no_dc, across(all_of(Row_identifier)), Ano, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
+
 Site_covs2 <- Site_covs %>%
   full_join(date_join_ano) %>% 
   # Change these two points to "Mosaic". This allows them to be included without biasing any of the landcovers we care more about (ssp, forest)
@@ -215,32 +240,37 @@ Site_covs2 <- Site_covs %>%
   ) %>%
   select(all_of(Row_identifier), Ano1, Id_gcs, Id_group_no_dc, Uniq_db, Departamento, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
 
-if(Habitat_split){
+if(Habitat_split_i){
   Site_covs2 <- Site_covs2 %>% 
     mutate(Habitat = case_when(
-      Habitat_sub == "Ripario" ~ "Bosque ripario", 
+      Habitat_sub == "Ripario" ~ "Bosque ripario",
       Habitat == "Ssp" ~ paste0(Habitat, "-", Habitat_sub), 
       .default = Habitat
-    ))
+    )) %>% mutate(Habitat = ifelse(
+      Habitat == "Ssp-Intensivo", "Ssp-Arboles dispersos", Habitat
+    )) %>%
+    select(-Habitat_sub) 
 }
 
-if(all(unique(Site_covs$Ecoregion) == "Piedemonte")){
-  Site_covs2 <- Site_covs2 %>% select(-Habitat_sub) %>% 
+if(Pc_Habitat_i == "Gradient"){
+  Site_covs2 <- Site_covs2 %>% 
     mutate(Habitat = fct_relevel(Habitat, c("Mosaic", "Pastizales", "Ssp", "Bosque"))) #"Bosque ripario")
 }
 
-# Scale numeric values, create categorical random effects
+
+# Scale numeric values, create numeric random effects
 Site_covs3 <- Site_covs2 %>%
   mutate(across(where(is.numeric), ~ as.numeric(scale(.))), 
-# Categorical random effects have to be specified as numeric in spOccupancy
-  Id_group_no_dc = as.numeric(Id_group_no_dc),
-  Id_gcs = as.numeric(Id_gcs))
-if(Forest) {
+         # Categorical random effects have to be specified as numeric in spOccupancy
+         Id_group_no_dc = as.numeric(Id_group_no_dc),
+         Id_gcs = as.numeric(Id_gcs))
+
+if(Pc_Habitat_i == "Forest") {
   Site_covs3 <- Site_covs3 %>% 
-  mutate(
-    Ecoregion_num = as.numeric(Ecoregion),
-    Departamento_num = as.numeric(Departamento)
-    ) 
+    mutate(
+      Ecoregion_num = as.numeric(Ecoregion),
+      Departamento_num = as.numeric(Departamento)
+    )
 }
 
 # >Rm habitat = cultivos?  -------------------------------------------------
@@ -252,7 +282,7 @@ if(Forest) {
 #}
 
 #Rm_tbl <- Site_covs2 %>% filter(is.na(Habitat)) %>% 
-  #distinct(across(all_of(Row_identifier)))
+#distinct(across(all_of(Row_identifier)))
 
 # Observation covariates ----------------------------------------------------
 ## Create and format key detection covariates
@@ -288,9 +318,9 @@ Ecoregion_equiv <- tibble(
   Ecoregion = c("Bajo magdalena", "Boyaca santander", "Cafetera", "Rio cesar", "Piedemonte"), 
   region = c("Caribbean", "Andes", "Andes", "Caribbean", "Orinoquia")
 )
-if(all(unique(Site_covs$Ecoregion) == "Piedemonte")){
+if(Pc_Habitat_i == "Gradient"){
   Ecoregion_equiv <- Ecoregion_equiv %>% filter(Ecoregion == "Piedemonte")
-  }
+}
 newdat_sites2 <- newdat_sites %>% left_join(Ecoregion_equiv)
 
 ## Predict the Probability of breeding using Moreno-Palacios model
@@ -315,8 +345,8 @@ Site_covs_forest <- Site_covs %>%
   mutate(Forest_bin = ifelse(Habitat == "Bosque", "Y", "N"))
 Event_covs3 <- Event_covs2 %>% 
   left_join(Site_covs_forest[,c("Id_muestreo_no_dc", "Forest_bin")]) #%>%
-  #mutate(Julian_day2 = poly(Julian_day, 2),
-   #      Pc_start2 = poly(Pc_start, 2))
+#mutate(Julian_day2 = poly(Julian_day, 2),
+#      Pc_start2 = poly(Pc_start, 2))
 
 # >Registrado_por ---------------------------------------------------------
 Event_covs4 <- Event_covs3 %>% 
@@ -338,7 +368,7 @@ Collector_team_join <- Event_covs4 %>%
   mutate(Collector_team_num = first(Collector_team_num), .by = Collector_team)
 Event_covs5 <- Event_covs4 %>% left_join(Collector_team_join) %>%
   mutate(Collector_team_num = as.factor(Collector_team_num)) #, 
-         #Collector_team = as.numeric(Collector_team))
+#Collector_team = as.numeric(Collector_team))
 #sample(unique(Event_covs5$Collector_team), size = 20)
 Event_covs5 %>% distinct(Uniq_db, Collector_team_num)
 
@@ -352,7 +382,7 @@ Event_covs6 <- Event_covs5 %>%
 # Lengthen then widen dataframe
 Obs_covs_df <- Event_covs6 %>%
   mutate(across(where(~ is.numeric(.) | inherits(., "hms")), ~ scale(.)),
-  across(everything(), as.character)) %>%
+         across(everything(), as.character)) %>%
   pivot_longer(
     # Select detection covariates here
     cols = c(
@@ -436,30 +466,6 @@ Abund_wide_l <- Abund_no_obs2 %>%
   ) %>%
   split(.$Rep_season)
 
-if(FALSE){
-
-map(Abund_wide_l, \(rep_df){
-  select(-Rep_season) %>%
-  right_join(Species_list) 
-})
-  reorder_species(Order_meta) %>% 
-  pull(order_key)
-  filter(Species_ayerbe_ == "Glaucis_hirsutus") %>%
-  mutate(across(everything(), ~replace_na(.x, 0))) %>%
-  column_to_rownames(var = "Species_ayerbe_") %>% 
-  rowSums(na.rm = TRUE)
-  
-  
-# WORKING 
-
-  Abund_wide_l[[1]] %>%
-    select(-Rep_season) %>%
-    right_join(Species_list) 
-    arrange(match(Species_ayerbe_, Order_meta_no_forest)) %>% 
-    pull(Species_ayerbe_)
-    
-}
-
 # Generate a species list so that each replicate tbl (1-5) will have the full species list
 Species_list <- Bird_pcs_analysis4 %>% distinct(Species_ayerbe_)
 
@@ -470,17 +476,7 @@ reorder.species <- function(Order_vec){
 }
 
 # Reorder species for more efficient estimation of latent factors
-if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & Forest_subset){
-  Spp_order <- reorder.species(Order_meta_forest)
-} else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & All_spp){
-  Spp_order <- reorder.species(Order_meta)
-}   else if(all(unique(Site_covs$Ecoregion) == "Piedemonte") & !Forest_subset){
-  Spp_order <- reorder.species(Order_meta_no_forest)
-} else if(Forest){
-  Spp_order <- reorder.species(Order_forest2)
-} else{
-  Spp_order <- reorder.species(Order_spp)
-}
+Spp_order <- reorder.species(!!sym(Spp_order_i))
 
 # Join with Species_list and convert NAs to 0s
 Abund_rep_l <- map(Abund_wide_l, \(rep_df){
@@ -615,7 +611,9 @@ if("Thripadectes virgaticeps" %in% Species_list2$Species_ayerbe){
   Thripadectes_virgaticeps_sf <- st_read(
     "../Geospatial_data/Thripadectes_virgaticeps", 
     layer = "SppDataRequest"
-    )
+  ) %>% 
+    rename(Nombre = SCI_NAME) %>% 
+    select(Nombre, geometry)
   Thripadectes_virgaticeps_sf_col <- st_crop(Thripadectes_virgaticeps_sf, neCol)
   Ayerbe_mod_spp_l2$`Thripadectes virgaticeps` <- Thripadectes_virgaticeps_sf_col 
 }
@@ -623,7 +621,7 @@ if("Machaeropterus striolatus" %in% Species_list2$Species_ayerbe){
   Ayerbe_mod_spp_l2$`Machaeropterus striolatus` <- st_read(
     dsn = "../Geospatial_data/Ayerbe_shapefiles_1890spp", 
     layer = "Machaeropterus regulus"
-    )
+  )
 }
 
 # Bind into single spatial object
@@ -691,13 +689,12 @@ names(msOcc_l)[2] <- "occ.covs"
 
 # Save object -------------------------------------------------------------
 stop()
-saveRDS(msOcc_l, "Rdata/msOcc_l_meta_271_rep_fix.rds")
+saveRDS(msOcc_l, "Rdata/msOcc_l_all_sites_555.rds")
 
 # EXTRAS ------------------------------------------------------------------
 
 # >Checks -----------------------------------------------------------------
 dim(msOcc_l$y)
-rownames(msOcc_l$y)
 
 # Detection covariates should have NAs in the same locations
 Obs_na_l <- map(Obs_covs_l, \(df){
@@ -728,15 +725,24 @@ Site_covs3 %>% slice(probs)
 # Actual observations at sites
 obs_sites <- apply(msOcc_l$y, c(1,2), max, na.rm = TRUE)
 obs_occ <- rowSums(obs_sites)
-obs_occ
+sort(obs_occ, decreasing = TRUE) %>% hist()
 
 # Should be none
 names(obs_occ[obs_occ == 0])
 # Should be TRUE
 all(sapply(msOcc_l$y, \(x) identical(rownames(x), rownames(msOcc_l$y[[1]]))))
 
+# >NMDS -------------------------------------------------------------------
 
+obs_sites <- apply(msOcc_l$y, c(1,2), max, na.rm = TRUE) %>% 
+  t()
 
+# NEED FT_abu
+
+Birds_mat <- Meta_birds %>% arrange(Id_muestreo) %>% 
+  column_to_rownames("Id_muestreo") %>% 
+  filter(rowSums(.) != 0) %>%
+  as.matrix()
 
 
 # >Plot probability breeding ----------------------------------------------
