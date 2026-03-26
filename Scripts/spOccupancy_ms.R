@@ -595,6 +595,52 @@ richness_tbl %>%
   geom_density(aes(x = richness, color = Habitat, group = Id_muestreo_ano), #
                alpha = .02)
 
+# >Inspect random effects ----------------------------------------------------
+# Function to create random effect table
+create.re.tbl <- function(re.samples){
+  Intercept <- colMeans(re.samples)
+  Group <- str_split_i(names(Intercept), "-", 1)
+  Id <- str_split_i(names(Intercept), "-", 2)
+  Species <- str_split_i(names(Intercept), "-", 3)
+  # Join together as tibble
+  tibble(Group, Id, Species, Intercept)
+}
+
+## Detectability random effect - observer team
+Detectability_re <- create.re.tbl(Occ_mod$alpha.star.samples) %>% 
+  select(-Group) %>% 
+  rename(Collector_team_num = Id)
+
+# Global mean & sd from summary(Occ_mod)
+Global_mean <- tibble(
+  Collector_team_num = "Global_mean", 
+  Species = NA,
+  Intercept = rnorm(100, .1458, 0.022)
+)
+
+# Plot
+Detectability_re %>% bind_rows(Global_mean) %>%
+  #filter(Collector_team_num %in% c(1,3, 9, 10)) %>%
+  ggplot(aes(x = Intercept, color = Collector_team_num)) + 
+  geom_density() + 
+  # Global mean
+  geom_vline(xintercept = .1458, linetype = "dashed") +
+  labs(title = "All regions - 100 species", x = "Log detectability intercept")
+
+## Occupancy random effect - Department
+Department_re <- create.re.tbl(Occ_mod$beta.star.samples) %>% 
+  filter(Group != "Id_group_no_dc") %>% 
+  select(-Group) %>% 
+  rename(Departamento_num = Id) %>% 
+  mutate(Departamento_num = as.numeric(Departamento_num))
+
+# Plot
+msOcc_l$occ.covs[,c("Departamento", "Departamento_num")] %>% distinct() %>%
+  full_join(Department_re) %>% 
+  ggplot(aes(x = Intercept, color = Departamento)) + 
+  geom_density() +
+  labs(title = "All regions - 100 species", x = "Log occupancy intercept")
+
 # >Effective spatial range ------------------------------------------------
 # Examine the estimated effective spatial ranges
 effective_sp_range <- parms_df %>% 
