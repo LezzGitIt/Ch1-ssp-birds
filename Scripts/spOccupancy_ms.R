@@ -24,7 +24,7 @@ conflicts_prefer(dplyr::filter)
 
 # Create space by removing old models
 rm(list = ls()[!(ls() %in% c())])
-msOcc_l <- readRDS("Rdata/msOcc_l_meta_11.rds")
+msOcc_l <- readRDS("Rdata/msOcc_l_all_sites_100.rds")
 
 ## Load data
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
@@ -36,8 +36,6 @@ Hatico_pc_nums <- str_pad(1:12, width = 2, pad = 0)
 Pc_locs_dc_sf <- st_read(
   paste0(Wrangling_repo, "Derived_geospatial/shp/Pc_locs_dc.gpkg")
 ) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
-
-source("Scripts/spOcc_fns.R")
 
 Forest <- FALSE
 
@@ -188,11 +186,11 @@ ggsave("Figures/alpha_post_8fac.png", bg = "white") #beta
 
 # Spatial -----------------------------------------------------------
 if(Forest){ # Forest_typ
-  occ.formula <- as.formula("~ Canopy_height_m + Canopy_cover + Ano1 + I(Ano1^2) + Elev + (1 | Id_group_no_dc)") # (1 | Departamento_num) + (1 | Ecoregion_num) + te + ssp + Canopy_cover 
-  det.formula <- as.formula("~ Pc_start + I(Pc_start^2) + Prob_breed + (1 | Collector_team_num)") #Julian_day + I(Julian_day^2)  
+  occ.formula <- as.formula("~ Canopy_height_m + Canopy_cover + Dist_forest + Ano1 + I(Ano1^2) + (1 | Id_gcs) + (1 | Departamento_num)") #+ (1 | Ecoregion_num) + te + ssp + Canopy_cover 
+  det.formula <- as.formula("~ Pc_start + I(Pc_start^2) + Prob_breed + (1 | Collector_team_num)") #Julian_day + I(Julian_day^2) + In_out
 } else{
-  occ.formula <- as.formula("~ Habitat + te + ssp + (1 | Id_group_no_dc)") # Ecoregion
-  det.formula <- as.formula("~ Forest_bin + Pc_start + I(Pc_start^2) + Julian_day + I(Julian_day^2) + (1 | Collector_team_num)") # Forest_bin +
+  occ.formula <- as.formula("~ Habitat + Tot_prec + ssp + Canopy_cover + (1 | Id_group_no_dc) + (1 | Departamento_num)") # Ecoregion
+  det.formula <- as.formula("~ Forest_bin + Pc_start + I(Pc_start^2) + Prob_breed + Forest_bin + Sampling_day_log + (1 | Collector_team_num)") 
 }
 
 ## Priors on spatial decay parameter (phi)
@@ -204,7 +202,7 @@ dist_mat <- st_distance(Pc_locs_dc_sf)
 
 # Improved priors
 lower <- 3 / 25e3 # largest distance between points within an ecoregion is 175 km
-upper <- 3 / 500 # points are clustered, so replace min(dist_mat) with 'transect' length (500 m)
+upper <- 3 / 23e3 # points are clustered, so replace min(dist_mat) with 'transect' length (500 m)
 eff_spatial_range <- c(3 / upper, 3 / lower)
 eff_spatial_range / 1000 # Translate above priors to the possible effective spatial ranges you are allowing (in km)
 
@@ -214,7 +212,7 @@ priors <- list(beta.normal = list(mean = 0, var = 2.72),
                phi.unif = list(lower, upper))
 
 ## Initial values
-n.factors <- 2
+n.factors <- 7
 # Number of species
 N <- nrow(msOcc_l$y)
 # Initiate all lambda initial values to 0. 
@@ -232,7 +230,7 @@ lambda.inits
 
 # >Run mod ----------------------------------------------------------------
 ## Model paramaters
-n.batch <- 1600
+n.batch <- 1200
 batch.length <- 25
 n.chains <- 3
 Samples_per_chain <- n.batch * batch.length # Total number of samples 
@@ -247,9 +245,11 @@ Keep_per_chain <- (Samples_per_chain - n.burn) / n.thin
 Tot_samples <- Keep_per_chain * n.chains
 Tot_samples
 
+N_spp <- dim(msOcc_l$y)[1]
+N_ecor <- length(unique(msOcc_l$occ.covs$Ecoregion))
 dim(msOcc_l$y)
 start <- Sys.time()
-ms_11 <- svcMsPGOcc(
+ms_100 <- svcMsPGOcc(
   occ.formula = occ.formula, 
   det.formula = det.formula, 
   data = msOcc_l, 
@@ -275,15 +275,23 @@ ms_11 <- svcMsPGOcc(
 )
 end <- Sys.time()
 end - start
-Occ_mod <- ms_11
-
+Occ_mod <- ms_100
+  
 # >Save model -------------------------------------------------------------
-saveRDS(Occ_mod, paste0("Rdata/Model_output/Occ_mod_", Sys.Date(), ".rds"))
-rm(list = ls()[!(ls() %in% c("msOcc_l"))])
-load("Occ_mod2026-03-02.rds")
+save_path <- paste0("Rdata/Model_output/Occ_mod_", N_spp, "spp", N_ecor, "ecor_restrict_phi", Sys.Date(), ".rds")
+#Occ_mod <- readRDS("Rdata/Model_output/Occ_mod_42spp_causal2026-03-12.rds")
+saveRDS(Occ_mod, save_path)
+rm(list = ls()[!(ls() %in% c("msOcc_l", "Occ_mod", "Row_identifier"))])
+source("Scripts/spOcc_fns.R")
 
 # >Diagnostics ----------------------------------------------------------------
 summary(Occ_mod)
+
+# Species-specific detections (per visit)
+Occ_mod$alpha.samples %>% as_draws_df() %>% 
+  select(starts_with("(Intercept)")) %>% 
+  colMeans() %>% 
+  hist()
 
 # >>Waic -----------------------------------------------------
 # Expected log pointwise predictive density (elpd), the effective number of parameters (pD), waic is the sum of the waic values for each species 
@@ -292,7 +300,14 @@ waic_spp
 stop()
 
 # >>Rhat & ess ------------------------------------------------------------
-# Extract parameters 
+# Number of cmmunity parameters w/ rhat > 1.1
+TF_1.1 <- c(Occ_mod$rhat$beta.comm > 1.1, Occ_mod$rhat$tau.sq.beta > 1.1, Occ_mod$rhat$alpha.comm > 1.1, Occ_mod$rhat$tau.sq.alpha > 1.1)
+sum(TF_1.1) 
+
+# Theta (phi) samples - factor loadings
+sum(Occ_mod$rhat$theta > 1.1)
+
+# Extract all parameters 
 parms_df <- Occ_mod %>% 
   extract_parms(spatial = TRUE, ms = TRUE)
 
@@ -445,6 +460,7 @@ parms_df %>% filter(Species_num == "Formicivora_grisea")
 # >>Traceplots ------------------------------------------------------------
 # Spatial parameters
 plot(Occ_mod, param = "theta", density = FALSE)
+#plot(Occ_mod$theta.samples[,c(1,3,5)], param = "theta", density = FALSE)
 # Traceplots - factor loadings 
 #plot(Occ_mod$lambda.samples[,140:150], param = "lambda", density = FALSE)
 plot(Occ_mod, param = "lambda", density = FALSE)
@@ -479,10 +495,10 @@ draws_beta <- as_draws_df(Occ_mod$beta.comm.samples) %>%
 draws_alpha <- as_draws_df(Occ_mod$alpha.comm.samples) %>% 
   pivot_longer(cols = everything(), names_to = "param", values_to = "value")
 
-plot_half_eye <- function(df){
+plot_half_eye <- function(df, y_var){
   df %>% 
-    filter(!str_detect(param, "^\\.")) %>% # rm .iteration, .draw, and .chain
-    ggplot(aes(x = value, y = param, fill = param)) +
+    filter(!str_detect({{ y_var }}, "^\\.")) %>% # rm .iteration, .draw, and .chain
+    ggplot(aes(x = value, y = {{ y_var }}, fill = {{ y_var }})) +
     geom_vline(xintercept = 0, linetype = "dashed") +
     stat_halfeye(alpha = .8) +
     labs(x = NULL, y = NULL) +
@@ -492,21 +508,21 @@ plot_half_eye <- function(df){
 # Understand what is contained in (Intercept)
 draws_beta %>% 
   #filter(str_detect(param, "Habitat")) %>%
-  #filter(!str_detect(param, "Ecoregion|Intercept")) %>% 
-  plot_half_eye() #+ 
+  filter(!str_detect(param, "Ecoregion|Intercept")) %>% 
+  plot_half_eye(y_var = param) #+ 
   #labs(title = "100 species")
 plogis(.3)
 draws_alpha %>% 
   #filter(!str_detect(param, "institucion|Intercept")) %>%
-  plot_half_eye() + 
-  labs(title = "100 species")
+  plot_half_eye(y_var = param) #+ 
+  #labs(title = "100 species")
 plogis(-2) # Low detection probability
 
 #ggsave("Figures/alpha_post_8fac.png", bg = "white") #beta
 # Can play with bayesplot::mcmc_dens() function as well, or as.data.frame() to get posterior draws 
-
+  
 # >z samples --------------------------------------------------------------
-
+## Understandt the output z.samples
 # When subsetting the array... rows (posterior samples), columns (species), matrix slice (sites x year_grp)
 Occ_mod$z.samples[,1,1] # Species 1 was observed at site 1 
 
@@ -515,6 +531,58 @@ sum(Occ_mod$z.samples[2,,1]) # Species richness at site 1 in posterior sample 2
 sum(Occ_mod$z.samples[1,,2]) # Species richness at site 2 in posterior sample 1
 sum(Occ_mod$z.samples[4,,2]) # Species richness at site 2 in posterior sample 4
 
+
+# >>Compare actual to predicted -------------------------------------------
+## Actual observations at sites
+# Take max value across replicates (so species X site = 1 if it was observed across any of the 5 replicates) 
+obs_sites <- apply(msOcc_l$y, c(1,2), max, na.rm = TRUE)
+# Sum across rows to get the naive number of sites each species was detected at
+obs_occ <- rowSums(obs_sites)
+
+## Predicted occupancy from model
+# Sum the number of sites that each species was observed at. The rows preserve uncertainty
+colMeans(Occ_mod$z.samples[,,1])
+Occ_mod$z.samples[,6,1]
+
+occ_sites_mod <- apply(Occ_mod$z.samples, c(1,2), sum)
+# Take the mean across rows (uncertainty)
+post_occ <- colMeans(occ_sites_mod)
+
+# Compare tbl
+occ_compare <- tibble(
+  species = Occ_mod$sp.names,
+  observed = obs_occ,
+  posterior = post_occ,
+  inflation = posterior - observed
+)
+
+# Detection probability per species
+Det_int <- as_draws_df(Occ_mod$alpha.samples) %>% 
+  select(starts_with("(Intercept)")) %>% 
+  colMeans()
+names(Det_int) <- NULL
+Occ_int <- as_draws_df(Occ_mod$beta.samples) %>% 
+  select(starts_with("(Intercept)")) %>% 
+  colMeans()
+names(Occ_int) <- NULL
+
+occ_compare2 <- cbind(occ_compare, Det_int, Occ_int) %>%
+  arrange(desc(observed)) %>%
+  mutate(rank = row_number())
+
+# Visualize observed vs posterior
+occ_compare2 %>%
+  pivot_longer(c(observed, posterior), names_to="type", values_to="sites") %>%
+  ggplot(aes(rank, sites, color = type)) +
+  geom_line(linewidth = 1) + 
+  geom_point(aes(size = Det_int))
+
+# Inflation between observed and posterior prediction
+occ_compare2 %>% ggplot(aes(rank, inflation)) +
+  geom_point() +
+  geom_smooth()
+
+# >>Richness curves per point count ----------------------------------------
 richness_tbl <- Occ_mod$z.samples %>%
   apply(c(1,3), sum) %>%
   as_tibble()
