@@ -9,27 +9,24 @@ library(ggdist)
 
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
 Excels <- "Derived/Excels/"
-Ft <- read_csv(paste0(Wrangling_repo, Excels, "Functional_traits.csv"))
+Ft <- read_csv(paste0(Wrangling_repo, Excels, "Traits/Functional_traits.csv"))
 
 # Occupancy model output
-Occ_mod <- readRDS("Rdata/Model_output/Occ_mod_52spp_2026-03-05.rds")
+#Occ_mod <- readRDS("Rdata/Model_output/Occ_mod_100spp_meta_restrict_phi2026-03-25.rds")
 
 # Forest or non-forest? ---------------------------------------------------
-Forest <- TRUE
+Forest <- FALSE
+if(Forest){
+  variable_posthoc <- "Ano1"
+} else{
+  variable_posthoc <- "ssp"
+  } 
 
 # Format ------------------------------------------------------------------
 # Rows correspond to the posterior MCMC samples and the columns correspond to species
-if(Forest){
-  variable <- "Canopy_cover"
-  y_draws <- as_draws_df(Occ_mod$beta.samples) %>% 
-    select(starts_with(variable)) %>% 
-    rename_with(~str_remove(., paste0(variable, "-")))
-} else{
-  variable <- "HabitatSsp"
-  y_draws <- as_draws_df(Occ_mod$beta.samples) %>% 
-    select(starts_with(variable)) %>% 
-    rename_with(~str_remove(., paste0(variable, "-")))
-}
+y_draws <- as_draws_df(Occ_mod$beta.samples) %>% 
+  select(starts_with(variable_posthoc)) %>% 
+  rename_with(~str_remove(., paste0(variable_posthoc, "-")))
 
 # PCA of bill morph
 pca <- prcomp(data = Ft, ~ Beak.Depth + Beak.Length_Nares + Beak.Width)
@@ -61,7 +58,7 @@ postHoc_l_morph <- list(y = y_draws, covs = Ft_morph)
 
 # >Eye --------------------------------------------------------------------
 Ft_eye <- Ft_spp %>% filter(!is.na(Eye_resid)) %>% 
-  select(-Clutch)
+  select(Species_ayerbe, Eye_resid)
 Spp_eye <- Ft_eye %>% pull(Species_ayerbe) %>% 
   str_replace(" ", "_")
 y_draws_eye <- y_draws %>% select(all_of(Spp_eye)) 
@@ -70,16 +67,16 @@ y_draws_eye <- y_draws %>% select(all_of(Spp_eye))
 postHoc_l_eye <- list(y = y_draws_eye, covs = Ft_eye)
 
 # >Life-history -----------------------------------------------------------
-covariates_lh <- c("Elev_range_final", "Range.Size", "Habitat.Density", "Migration", "Trophic.Level")
+covariates_lh <- c("Elev_range_final", "Range.Size", "Habitat.Density", "Migration", "Trophic.Level", "gen_length", "Forest_bin")
 Ft_lh <- Ft_spp %>% 
   select(Species_ayerbe, all_of(covariates_lh)) %>%
   # postHocLM cannot accept any missing values in covariates
   filter(if_all(all_of(covariates_lh), ~ !is.na(.x)))
-postHoc_l_lh <- list(y = y_draws_eye, covs = Ft_lh)
+postHoc_l_lh <- list(y = y_draws, covs = Ft_lh)
 
 # >Clutch -----------------------------------------------------------------
 Ft_clutch <- Ft_spp %>% filter(!is.na(Clutch)) %>% 
-  select(-c(Eye_resid, Source_eye))
+  select(Species_ayerbe, Clutch)
 Spp_clutch <- Ft_clutch %>% pull(Species_ayerbe) %>% 
   str_replace(" ", "_")
 y_draws_clutch <- y_draws %>% select(all_of(Spp_clutch))
@@ -110,24 +107,48 @@ format.for.plotting <- function(samples){
     mutate(param = as.factor(param))
 }
 
-plot_half_eye <- function(df){
+plot_half_eye <- function(df, y_var){
   df %>% 
-    filter(!param %in% c(".iteration", ".draw", ".chain")) %>%
-    ggplot(aes(x = value, y = fct_rev(param), fill = param)) +
+    filter(!str_detect({{ y_var }}, "^\\.")) %>% # rm .iteration, .draw, and .chain
+    ggplot(aes(x = value, y = {{ y_var }}, fill = {{ y_var }})) +
     geom_vline(xintercept = 0, linetype = "dashed") +
-    ggdist::stat_halfeye(alpha = .8) +
-    guides(fill = "none") +
+    stat_halfeye(alpha = .8) +
     labs(x = NULL, y = NULL) +
-    theme_minimal()
+    guides(fill = "none")
 }
 
 ## Morphology
-format.for.plotting(postHoc_morph$beta.samples) %>% plot_half_eye()
+format.for.plotting(postHoc_morph$beta.samples) %>% plot_half_eye(y_var = param)
 # Residual eye 
-format.for.plotting(postHoc_eye$beta.samples) %>% plot_half_eye()
+format.for.plotting(postHoc_eye$beta.samples) %>% plot_half_eye(y_var = param)
 
 ## Life-history
-format.for.plotting(postHoc_lh$beta.samples) %>% plot_half_eye()
+format.for.plotting(postHoc_lh$beta.samples) %>% plot_half_eye(y_var = param)
 # Clutch size
-format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye()
- 
+format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye(y_var = param)
+
+# Inspect Threatened species ------------------------------------------------------
+
+tibble(Species_ayerbe = str_replace(names(y_draws), "_", " "), 
+       Response = colMeans(y_draws)) %>% 
+  left_join(Ft[, c("Species_ayerbe", "gen_length")]) %>% 
+  ggplot(aes(x = gen_length, y = Response)) + 
+  geom_point() + 
+  geom_smooth()
+
+# Select T&E species
+Spp_te <- Ft %>% 
+  mutate(Species_ayerbe_ = str_replace(Species_ayerbe, " ", "_")) %>%
+  filter(iucn_red_list != "LC") %>% 
+  filter(Species_ayerbe_ %in% Occ_mod$sp.names) %>% 
+  select(Species_ayerbe_, iucn_red_list)
+
+# Plot
+as_draws_df(Occ_mod$beta.samples) %>% 
+  select(starts_with(variable_posthoc)) %>% 
+  rename_with(~str_remove(., paste0(variable_posthoc, "-"))) %>%
+  select(Spp_te$Species_ayerbe_) %>%
+  pivot_longer(cols = everything(), 
+               names_to = "Species_ayerbe", 
+               values_to = "value") %>%
+  plot_half_eye(y_var = Species_ayerbe)
