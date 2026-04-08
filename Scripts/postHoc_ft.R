@@ -1,6 +1,8 @@
 ## PhD birds in silvopastoral landscapes ##
 # Post-hoc functional traits model 
 
+## Objective: Understand if response to silvopasture is influenced by species' morphological and life-history functional traits 
+
 # Load libraries & data ---------------------------------------------------
 library(tidyverse)
 library(posterior)
@@ -84,6 +86,27 @@ y_draws_clutch <- y_draws %>% select(all_of(Spp_clutch))
 # List required by postHocLM
 postHoc_l_clutch <- list(y = y_draws_clutch, covs = Ft_clutch)
 
+# >Nesting ----------------------------------------------------------------
+# Nest location
+covariates_nest_loc <- c("Nest_ground_bush", "N_nest_locs")
+Ft_nesting <- Ft_spp %>% 
+  select(Species_ayerbe, all_of(covariates_nest_loc)) %>%
+  # postHocLM cannot accept any missing values in covariates
+  filter(if_all(all_of(covariates_nest_loc), ~ !is.na(.x)))
+Spp_nesting <- Ft_nesting %>% pull(Species_ayerbe) %>% 
+  str_replace(" ", "_")
+y_draws_nesting <- y_draws %>% select(all_of(Spp_nesting))
+postHoc_l_nesting <- list(y = y_draws_nesting, covs = Ft_nesting)
+
+# Nest exposure
+Ft_nest_exp <- Ft_spp %>% 
+  filter(!is.na(Nest_exposure)) %>% 
+  select(Species_ayerbe, Nest_exposure)
+Spp_nest_exp <- Ft_nest_exp %>% pull(Species_ayerbe) %>% 
+  str_replace(" ", "_")
+y_draws_nest_exp <- y_draws %>% select(all_of(Spp_nest_exp))
+postHoc_l_nest_exp <- list(y = y_draws_nest_exp, covs = Ft_nest_exp)
+
 # Run model ---------------------------------------------------------------
 ## Morphology models
 # Morph variables: Mass + HWI + Tarsus.Length + Tail.Length + Beak_size + Beak_shape
@@ -98,6 +121,12 @@ lh_form <- as.formula(paste("~" , paste(covariates_lh, collapse = " + ")))
 postHoc_lh <- postHocLM(formula = lh_form, data = postHoc_l_lh)
 # Clutch
 postHoc_clutch <- postHocLM(formula = ~Clutch, data = postHoc_l_clutch)
+
+## Nesting 
+Nesting_form <- as.formula(paste("~" , paste(covariates_nest_loc, collapse = " + ")))
+postHoc_nesting <- postHocLM(formula = Nesting_form , data = postHoc_l_nesting)
+# Nest exp
+postHoc_nest_exp <- postHocLM(formula = ~Nest_exposure, data = postHoc_l_nest_exp)
 
 # Plot --------------------------------------------------------------------
 format.for.plotting <- function(samples){
@@ -124,6 +153,8 @@ format.for.plotting(postHoc_eye$beta.samples) %>% plot_half_eye(y_var = param)
 
 ## Life-history
 format.for.plotting(postHoc_lh$beta.samples) %>% plot_half_eye(y_var = param)
+format.for.plotting(postHoc_nesting$beta.samples) %>% plot_half_eye(y_var = param)
+format.for.plotting(postHoc_nest_exp$beta.samples) %>% plot_half_eye(y_var = param)
 # Clutch size
 format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye(y_var = param)
 
@@ -152,3 +183,6 @@ as_draws_df(Occ_mod$beta.samples) %>%
                names_to = "Species_ayerbe", 
                values_to = "value") %>%
   plot_half_eye(y_var = Species_ayerbe)
+
+# Examine sample sizes of T&E species
+sort(obs_occ[Spp_te$Species_ayerbe_])
