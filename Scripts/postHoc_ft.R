@@ -30,26 +30,54 @@ y_draws <- as_draws_df(Occ_mod$beta.samples) %>%
   select(starts_with(variable_posthoc)) %>% 
   rename_with(~str_remove(., paste0(variable_posthoc, "-")))
 
+# >PCA --------------------------------------------------------------------
 # PCA of bill morph
-pca <- prcomp(data = Ft, ~ Beak.Depth + Beak.Length_Nares + Beak.Width)
-Ft$Beak_size <- pca$x[,1]
-Ft$Beak_shape <- pca$x[,2]
+pca_bill <- prcomp(data = Ft, ~ Beak.Depth + Beak.Length_Nares + Beak.Width)
+Ft$Beak_size <- pca_bill$x[,1]
+Ft$Beak_shape <- pca_bill$x[,2]
+biplot(pca_bill)
 
-# Plot PCA
+## If beak size axes are negative, make positive
+if(all(pca_bill$rotation[,1] < 0)){
+  Ft$Beak_size <- -Ft$Beak_size
+} else if(all(pca_bill$rotation[,1] > 0)){
+  Ft$Beak_size
+} else{
+  stop("Inconsistent axes directionality")
+}
 
+# PCA of body size
+pca_size <- prcomp(data = Ft, ~ Mass + Tail.Length + Tarsus.Length)
+Ft$Body_size <- pca_size$x[,1]
+# Dominated by mass
+biplot(pca_size)
+
+## If body size axes are negative, make positive
+if(all(pca_size$rotation[,1] < 0)){
+  Ft$Body_size <- -Ft$Body_size
+} else if(all(pca_size$rotation[,1] > 0)){
+  Ft$Body_size
+} else{
+  stop("Inconsistent axes directionality")
+}
+
+# >General ----------------------------------------------------------------
 ## General format - Ensure species line up in Ft and y_draws
 Spp <- str_replace(names(y_draws), "_", " ")
 Ft_spp <- Ft %>%
   filter(Species_ayerbe %in% Spp) %>%
   rename(HWI = `Hand-Wing.Index`) %>%
-  mutate(Species_ayerbe = factor(Species_ayerbe, levels = Spp)) %>%
+  mutate(Species_ayerbe = factor(Species_ayerbe, levels = Spp),
+         Trophic.Level = ifelse(
+           Trophic.Level == "Scavenger", "Carnivore", Trophic.Level)
+         ) %>%
   arrange(Species_ayerbe) %>%
   mutate(across(where(is.numeric), scale)) %>% 
   select(-Species_bl) %>% 
   distinct()
 
 # >Morphology -------------------------------------------------------------
-covariates_morph <- c("Mass", "HWI", "Tarsus.Length", "Tail.Length", "Beak_size", "Beak_shape")
+covariates_morph <- c("Body_size", "HWI", "Beak_size", "Beak_shape")
 Ft_morph <- Ft_spp %>% 
   select(Species_ayerbe, all_of(covariates_morph)) %>%
   # postHocLM cannot accept any missing values in covariates
@@ -69,11 +97,12 @@ y_draws_eye <- y_draws %>% select(all_of(Spp_eye))
 postHoc_l_eye <- list(y = y_draws_eye, covs = Ft_eye)
 
 # >Life-history -----------------------------------------------------------
-covariates_lh <- c("Elev_range_final", "Range.Size", "Habitat.Density", "Migration", "Trophic.Level", "gen_length", "Forest_bin")
+covariates_lh <- c("Habitat.Density", "Migration", "Trophic.Level", "gen_length")
+covariates_specialization <- c("Elev_range_final", "Range.Size", "Forest_bin", "Habitat_breadth", "Diet_breadth") # "Ecological_specialization"
 Ft_lh <- Ft_spp %>% 
-  select(Species_ayerbe, all_of(covariates_lh)) %>%
+  select(Species_ayerbe, all_of(c(covariates_lh, covariates_specialization))) %>%
   # postHocLM cannot accept any missing values in covariates
-  filter(if_all(all_of(covariates_lh), ~ !is.na(.x)))
+  filter(if_all(all_of(c(covariates_lh, covariates_specialization)), ~ !is.na(.x)))
 postHoc_l_lh <- list(y = y_draws, covs = Ft_lh)
 
 # >Clutch -----------------------------------------------------------------
@@ -107,6 +136,24 @@ Spp_nest_exp <- Ft_nest_exp %>% pull(Species_ayerbe) %>%
 y_draws_nest_exp <- y_draws %>% select(all_of(Spp_nest_exp))
 postHoc_l_nest_exp <- list(y = y_draws_nest_exp, covs = Ft_nest_exp)
 
+# Examine correlations ----------------------------------------------------
+# Morphology
+Ft_spp %>% 
+  select(all_of(covariates_morph), Mass, Tarsus.Length, Tail.Length) %>%
+GGally::ggcorr(label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
+
+# Genearl life-history covariates (categorical)
+if(FALSE){
+  Ft_spp %>% 
+    select(all_of(covariates_lh)) %>% 
+    GGally::ggpairs()
+}
+
+# Specialization covariates
+Ft_spp %>% 
+  select(Species_ayerbe, all_of(covariates_specialization), Ecological_specialization) %>% 
+  GGally::ggcorr(label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
+
 # Run model ---------------------------------------------------------------
 ## Morphology models
 # Morph variables: Mass + HWI + Tarsus.Length + Tail.Length + Beak_size + Beak_shape
@@ -119,19 +166,24 @@ postHoc_eye <- postHocLM(formula = ~Eye_resid, data = postHoc_l_eye)
 # Lh vars: Range.Size + Elev_range_final + Habitat.Density + Migration + Trophic.Level
 lh_form <- as.formula(paste("~" , paste(covariates_lh, collapse = " + ")))
 postHoc_lh <- postHocLM(formula = lh_form, data = postHoc_l_lh)
+
+# Specialization
+specialization_form <- as.formula(paste("~" , paste(covariates_specialization, collapse = " + ")))
+postHoc_specialization <- postHocLM(formula = specialization_form, data = postHoc_l_lh)
+
 # Clutch
 postHoc_clutch <- postHocLM(formula = ~Clutch, data = postHoc_l_clutch)
 
 ## Nesting 
 Nesting_form <- as.formula(paste("~" , paste(covariates_nest_loc, collapse = " + ")))
 postHoc_nesting <- postHocLM(formula = Nesting_form , data = postHoc_l_nesting)
-# Nest exp
+# Nest exposure
 postHoc_nest_exp <- postHocLM(formula = ~Nest_exposure, data = postHoc_l_nest_exp)
 
 # Plot --------------------------------------------------------------------
 format.for.plotting <- function(samples){
   samples %>% as_draws_df() %>%
-    rename_with(~str_remove(., "Habitat")) %>%
+    #rename_with(~str_remove(., "Habitat")) %>%
     pivot_longer(cols = everything(), names_to = "param", values_to = "value") %>%
     mutate(param = as.factor(param))
 }
@@ -153,13 +205,15 @@ format.for.plotting(postHoc_eye$beta.samples) %>% plot_half_eye(y_var = param)
 
 ## Life-history
 format.for.plotting(postHoc_lh$beta.samples) %>% plot_half_eye(y_var = param)
+# Specialization
+format.for.plotting(postHoc_specialization$beta.samples) %>% plot_half_eye(y_var = param)
+# Nesting
 format.for.plotting(postHoc_nesting$beta.samples) %>% plot_half_eye(y_var = param)
 format.for.plotting(postHoc_nest_exp$beta.samples) %>% plot_half_eye(y_var = param)
 # Clutch size
 format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye(y_var = param)
 
 # Inspect Threatened species ------------------------------------------------------
-
 tibble(Species_ayerbe = str_replace(names(y_draws), "_", " "), 
        Response = colMeans(y_draws)) %>% 
   left_join(Ft[, c("Species_ayerbe", "gen_length")]) %>% 
