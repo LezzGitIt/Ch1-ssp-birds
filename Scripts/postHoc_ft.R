@@ -14,14 +14,14 @@ Excels <- "Derived/Excels/"
 Ft <- read_csv(paste0(Wrangling_repo, Excels, "Traits/Functional_traits.csv"))
 
 # Occupancy model output
-#Occ_mod <- readRDS("Rdata/Model_output/Occ_mod_100spp_meta_restrict_phi2026-03-25.rds")
+Occ_mod <- readRDS("Rdata/Model_output/Occ_mod_99spp_1ecor_ref_2026-05-06.rds")
 
 # Forest or non-forest? ---------------------------------------------------
 Forest <- FALSE
 if(Forest){
   variable_posthoc <- "Ano1"
 } else{
-  variable_posthoc <- "ssp"
+  variable_posthoc <- "HabitatSsp"
   } 
 
 # Format ------------------------------------------------------------------
@@ -97,7 +97,7 @@ y_draws_eye <- y_draws %>% select(all_of(Spp_eye))
 postHoc_l_eye <- list(y = y_draws_eye, covs = Ft_eye)
 
 # >Life-history -----------------------------------------------------------
-covariates_lh <- c("Habitat.Density", "Migration", "Trophic.Level", "gen_length")
+covariates_lh <- c("Habitat.Density", "Migration_avo", "Trophic.Level", "gen_length")
 covariates_specialization <- c("Elev_range_final", "Range.Size", "Forest_bin", "Habitat_breadth", "Diet_breadth") # "Ecological_specialization"
 Ft_lh <- Ft_spp %>% 
   select(Species_ayerbe, all_of(c(covariates_lh, covariates_specialization))) %>%
@@ -140,7 +140,7 @@ postHoc_l_nest_exp <- list(y = y_draws_nest_exp, covs = Ft_nest_exp)
 # Morphology
 Ft_spp %>% 
   select(all_of(covariates_morph), Mass, Tarsus.Length, Tail.Length) %>%
-GGally::ggcorr(label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
+  GGally::ggcorr(label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
 
 # Genearl life-history covariates (categorical)
 if(FALSE){
@@ -181,6 +181,7 @@ postHoc_nesting <- postHocLM(formula = Nesting_form , data = postHoc_l_nesting)
 postHoc_nest_exp <- postHocLM(formula = ~Nest_exposure, data = postHoc_l_nest_exp)
 
 # Plot --------------------------------------------------------------------
+# Formatting function
 format.for.plotting <- function(samples){
   samples %>% as_draws_df() %>%
     #rename_with(~str_remove(., "Habitat")) %>%
@@ -188,30 +189,40 @@ format.for.plotting <- function(samples){
     mutate(param = as.factor(param))
 }
 
-plot_half_eye <- function(df, y_var){
-  df %>% 
-    filter(!str_detect({{ y_var }}, "^\\.")) %>% # rm .iteration, .draw, and .chain
+# Number of species included
+N_spp <- length(Occ_mod$sp.names)
+N_spp_eye <- nrow(Ft_eye)
+N_spp_clutch <- nrow(Ft_clutch)
+N_spp_nest <- nrow(Ft_nesting)
+N_spp_nest_exp <- nrow(Ft_nest_exp)
+
+# Plot posteriors function
+plot_half_eye <- function(df, y_var, N_species = N_spp, Intercept = FALSE){
+  if(isFALSE(Intercept)) {df <-  df %>% filter(param != "(Intercept)") }
+  df %>% filter(!str_detect({{ y_var }}, "^\\.")) %>% # rm .iteration, .draw, and .chain
     ggplot(aes(x = value, y = {{ y_var }}, fill = {{ y_var }})) +
     geom_vline(xintercept = 0, linetype = "dashed") +
     stat_halfeye(alpha = .8) +
-    labs(x = NULL, y = NULL) +
+    labs(x = NULL, y = NULL, title = paste({{ N_species }}, "species")) +
     guides(fill = "none")
 }
 
 ## Morphology
-format.for.plotting(postHoc_morph$beta.samples) %>% plot_half_eye(y_var = param)
+format.for.plotting(postHoc_morph$beta.samples) %>% plot_half_eye(y_var = param) 
 # Residual eye 
-format.for.plotting(postHoc_eye$beta.samples) %>% plot_half_eye(y_var = param)
+format.for.plotting(postHoc_eye$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_eye)
 
 ## Life-history
 format.for.plotting(postHoc_lh$beta.samples) %>% plot_half_eye(y_var = param)
 # Specialization
-format.for.plotting(postHoc_specialization$beta.samples) %>% plot_half_eye(y_var = param)
+format.for.plotting(postHoc_specialization$beta.samples) %>%
+  #filter(param != "Diet_breadth") %>%
+  plot_half_eye(y_var = param)
 # Nesting
-format.for.plotting(postHoc_nesting$beta.samples) %>% plot_half_eye(y_var = param)
-format.for.plotting(postHoc_nest_exp$beta.samples) %>% plot_half_eye(y_var = param)
+format.for.plotting(postHoc_nesting$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_nest)
+format.for.plotting(postHoc_nest_exp$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_nest_exp)
 # Clutch size
-format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye(y_var = param)
+format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_clutch)
 
 # Inspect Threatened species ------------------------------------------------------
 tibble(Species_ayerbe = str_replace(names(y_draws), "_", " "), 
@@ -236,7 +247,7 @@ as_draws_df(Occ_mod$beta.samples) %>%
   pivot_longer(cols = everything(), 
                names_to = "Species_ayerbe", 
                values_to = "value") %>%
-  plot_half_eye(y_var = Species_ayerbe)
+  plot_half_eye(y_var = Species_ayerbe, Intercept = NA)
 
 # Examine sample sizes of T&E species
 sort(obs_occ[Spp_te$Species_ayerbe_])
