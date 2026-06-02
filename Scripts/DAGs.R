@@ -105,6 +105,86 @@ tidy_dagitty(dag_LC, layout = "fr") %>%
   theme_dag() + 
   guides(fill = "none", color = "none")
 
+
+# Interaction DAG ---------------------------------------------------------
+# >Attia et al (2022) -----------------------------------------------------
+# Specify relationships using Attia et al (2022) notation
+idag <- dagitty('
+dag {
+
+  bb = "-.5,-.5,.5,.5"
+
+  Time 
+  lc_50m
+  timeXlc_50m [exposure]
+  Biodiversity      [outcome, pos="0,-0.45"]
+
+  Time -> lc_50m
+  Time -> timeXlc_50m
+  lc_50m -> timeXlc_50m
+  Time -> Biodiversity
+  lc_50m -> Biodiversity
+  timeXlc_50m -> Biodiversity
+}
+')
+plot(idag, node.names = c("timeXlc_50m" = "Time x Local LC"), cex = 1.6)
+adjustmentSets(idag)
+
+# Specify relationships - Short term rainfall could be an important variable
+# Sampling acts as a confounder on the interaction of timeXlc_50m, because it influences the chance of seeing pasture and SSP in later years (after 2019), and also indirectly influences biodiversity through the observation process
+idag_complex <- dagify(
+  Biodiversity_obs ~ Biodiversity + Obs_skill,
+  Obs_skill ~ Sampling,
+  Biodiversity ~ lc_50m + Ssp_matrix + Climate + Landscape_forest + Unknown + timeXlc_50m + Landscape_forestXlc_50m + climateXlc_50m + Time, #Time_since_planting  + Elevation
+  timeXlc_50m ~ Time + lc_50m + Sampling,
+  Landscape_forestXlc_50m ~ Landscape_forest + lc_50m, 
+  climateXlc_50m ~ Climate + lc_50m,
+  lc_50m ~ Time + Farmer_values + Sampling, 
+  Ssp_matrix ~ Climate + Farmer_values + Unknown,
+  Landscape_forest ~ Farmer_values + Time + Climate,
+  Sampling ~ Time,
+  Unknown ~ Spatial_auto,
+  exposure = c("timeXlc_50m"), # "Landscape_forestXlc_50m"
+  outcome = "Biodiversity" #,
+  #latent = Sampling
+)
+
+# Adjustment set - Remove latent variables to see
+adjustmentSets(idag_complex, type = "minimal") 
+
+# Plot
+tidy_dagitty(idag_complex, layout = "fr") %>% 
+  ggdag_status(text_col = "black",
+               text = TRUE, 
+               edge_type = "link_arc",
+               node_size = 20,
+               text_size = 3, 
+               stylized = TRUE) + 
+  theme_dag() + 
+  guides(fill = "none", color = "none")
+
+# >Nilsson et al (2021) ---------------------------------------------------
+# Specify relationships using Nilsson et al (2021) notation (delta Y)
+idag <- dagify(
+  Change_Biodiv_LC ~ Climate + Landscape_forest + Time_since_planting,  
+  Landscape_forest ~ Farmer_values,
+  outcome = "Change_Biodiv_LC",
+  latent = c("Farmer_values") 
+)
+# Adjustment set - Remove latent variables to see
+adjustmentSets(idag, type = "minimal") 
+
+# Plot
+tidy_dagitty(idag, layout = "fr") %>% 
+  ggdag_status(text_col = "black",
+               text = TRUE, 
+               edge_type = "link_arc",
+               node_size = 20,
+               text_size = 3, 
+               stylized = TRUE) + 
+  theme_dag() + 
+  guides(fill = "none", color = "none")
+
 # All variables ------------------------------------------------------------
 # Mathilde biases also include my biases, like that I know Meta better then other regions
 # Climatic_extremes would be like strong El niño years, drought, etc. whereas climate refers more generally to fact that warmer & wetter tends to have higher species richness
