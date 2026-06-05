@@ -1,0 +1,359 @@
+---
+title: "Predictors of bird diversity on SCR farms"
+number-sections: true
+# If you do not want code to show... echo: false
+execute: 
+ #echo: false
+ message: false
+ warning: false
+ #toc: true
+format:
+  elsevier-pdf: # elsevier-pdf
+    header-includes:
+      - |
+        \usepackage{fancyhdr}
+        \pagestyle{fancy}
+        \usepackage{makecell}
+        \usepackage{lineno}
+        \linenumbers
+        \usepackage[margin=1in]{geometry}
+        \setlength{\LTleft}{\fill}
+        \setlength{\LTright}{\fill}
+metadata-files: 
+  - ../Suppfiles/author_my_info.yml
+---
+
+{{< pagebreak >}}
+
+# Goal
+
+Analyze the farm-level taxonomic diversity estimates prepared in `02_Analysis_iNEXT.qmd` as a function of geographic and sampling predictors.
+
+```{r}
+#| label: libraries
+#| include: false
+
+library(tidyverse)
+library(readxl)
+library(janitor)
+library(lme4)
+library(MASS)
+library(car)
+library(ggeffects)
+library(performance)
+library(GGally)
+library(sjPlot)
+library(cowplot)
+library(ggpubr)
+library(conflicted)
+
+ggplot2::theme_set(theme_cowplot())
+conflicts_prefer(dplyr::select)
+conflicts_prefer(dplyr::filter)
+```
+
+```{r}
+#| label: import-data
+#| include: false
+
+## Import taxonomic diversity data 
+# q12 has larger samples with all farms, but low sample coverage for the non-asymptotic diversity estimate (q = 0)
+Td_q12 <- read_csv("Derived/Excels/Tax_div_all_farms_06.04.26.csv") 
+# q0 has the low sample coverage farms removed 
+Td_q0 <- read_csv("Derived/Excels/Tax_div_coverage65_06.04.26.csv")
+
+## Load site and event covariates
+Wrangling_repo <- "../Ssp-bird-data-wrangling/"
+Excels <- "Derived/Excels/"
+
+Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv"))
+Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv"))
+```
+
+# Define assemblage
+
+Data collector X farm ID X Year X Season
+
+```{r}
+#| label: Define-script-run-parameters
+#| include: true
+#| echo: true
+
+Row_id_inext <- c("Uniq_db", "Id_gcs", "Ano_grp", "Season") 
+#Row_id_inext <- c("Uniq_db", "Id_muestreo", "Ano_grp")
+```
+
+```{r}
+#| label: formatting
+#| include: false
+
+## Link relevant covariates to point count data
+# Subset Site and Event covariates
+Df_covs <- Site_covs %>% 
+  select(Id_muestreo_no_dc, Id_gcs) %>% 
+  left_join(Event_covs) %>% 
+   mutate(Identifier = pmap_chr(
+    across(all_of(Row_id_inext)), ~ paste(..., sep = ".")
+  )) %>% mutate(Identifier = str_replace_all(
+    Identifier, pattern = " |-", replacement = "_")
+    )
+
+Df_covs2 <- Df_covs %>%
+  mutate(Num_pc = n_distinct(Id_muestreo),
+         j_day = mean(yday(Fecha)),
+         .by = Identifier) %>%
+  mutate(Year = str_split_i(Ano_grp, pattern = "-", i = 1), 
+         Year = as.numeric(Year)) %>% 
+  distinct(Identifier, Id_gcs, Num_pc, Year, j_day) 
+
+# 73 farms
+Site_join <- Site_covs %>% 
+  select(Id_gcs, Id_muestreo_no_dc, Ecoregion, Avg_temp, Tot_prec, Elev) %>% 
+  mutate(Avg_temp = mean(Avg_temp), 
+         Tot_prec = mean(Tot_prec), 
+         Elev = mean(Elev), 
+         .by = Id_gcs) %>% 
+  select(-Id_muestreo_no_dc) %>% 
+  distinct() 
+
+Df_covs3 <- Df_covs2 %>% 
+  left_join(Site_join) %>% 
+  mutate(Num_pc_log = log(Num_pc),
+         across(where(is.numeric) , scale))
+
+# Remove UBC farm with 2 forest points
+df.a <- Td_q0 %>%  
+  filter(Id_gcs != 3133) %>%
+  select(-Id_gcs) %>%
+  left_join(Df_covs3, by = join_by("Assemblage" == "Identifier")) %>% 
+  # Very few with 4, collapse to 3 (3 or more)
+  mutate(Num.hab = fct_collapse(as.factor(Num.hab), "3" = c("3", "4")), 
+         Num.hab = fct_inseq(Num.hab), 
+         Id_gcs = as.factor(Id_gcs),
+         CollectorXyear = paste(Uniq_db, Ano_grp, sep = "_")) %>% 
+  mutate(across(.cols = c(No_Asy_TD, TD_asy, Evenness), \(x) round(x, 0)))
+
+# Create list, separating tbl by the order q 
+Hill_nums <- setNames(c(0,1,2), c("Richness", "Shannon", "Simpson"))
+df.a.l <- map(Hill_nums, \(order.q){
+  df.a %>% filter(Order.q == order.q)
+})
+```
+
+# Collinearity
+
+```{r}
+#| label: fig-collinearity-continuous
+#| fig-cap: Collinearity is OK in continuous predictors, except that elevation and temperature are perfectly correlated.
+#| echo: false
+
+## Examine collinearity with categorical variables 
+cont_vars <- c("Year", "j_day", "Num_pc_log", "Avg_temp", "Tot_prec", "Elev")
+df.a.l$Richness %>% 
+  mutate(Num.hab = as.numeric(Num.hab)) %>%
+  select(all_of(cont_vars), Num.hab) %>% #
+  GGally::ggcorr(label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
+```
+
+```{r}
+#| label: collinearity-categorical
+#| include: false
+
+# Plot categorical-continuous covariates
+plot_cat_cor <- function(df, cat_x, y_var, y_title) {
+  df %>%
+    distinct({{ cat_x }}, .data[[y_var]]) %>%
+    ggplot(aes(x = {{ cat_x }}, y = .data[[y_var]])) +
+    geom_boxplot(outliers = FALSE) +
+    geom_jitter(width = 0.05, alpha = .4) +
+    labs(x = NULL, y = y_title)
+}
+
+## Boxplots
+# Ecoregion
+Cat_ecoregion_p <- map(cont_vars, \(cont_var){
+  plot_cat_cor(df = df.a.l$Richness, cat_x = Ecoregion, y_var = cont_var, y_title = cont_var)
+})
+
+# Unique db
+Cat_uniq_db_p <- map(cont_vars, \(cont_var){
+  plot_cat_cor(df = df.a.l$Richness, cat_x = Uniq_db, y_var = cont_var, y_title = cont_var)
+})
+
+## Examine variation explained by categorical covariates 
+# Ecoregion
+map_dfr(cont_vars, \(x) {
+  tibble(
+    variable = x,
+    R2 = summary(
+      lm(reformulate("Ecoregion", response = x),
+         data = Df_covs3)
+    )$r.squared
+  )
+})
+
+# Data collector
+map_dfr(cont_vars, \(x) {
+  tibble(
+    variable = x,
+    R2 = summary(
+      lm(reformulate("Uniq_db", response = x),
+         data = df.a.l$Richness)
+    )$r.squared
+  )
+})
+
+Df_covs3 %>%
+  ggplot() + 
+  geom_histogram(aes(x = Num_pc)) + 
+  scale_x_log10()
+```
+
+```{r}
+#| label: fig-collinearity-ecoregion
+#| echo: false
+#| fig-cap: Topography and climate are highly correlated with ecoregion. 
+
+ggarrange(Cat_ecoregion_p[[5]], Cat_ecoregion_p[[6]], nrow = 2)
+```
+
+```{r}
+#| label: fig-collinearity-uniqdb
+#| echo: false
+#| fig-cap: Year is highly collinear with the unique data collector. 
+
+Cat_uniq_db_p[[1]]
+```
+
+# Statistical Approach
+
+I modeled non-asymptotic diversity estimates (species richness at standardized sample coverage) using generalized linear mixed models (GLMMs). The negative binomial distribution was selected based on model comparison: preliminary Poisson and quasi-Poisson models showed substantial overdispersion (dispersion ratio = 2.34, $X^2$ = 207), violating Poisson assumptions. The negative binomial accommodates this excess variance via a dispersion parameter.
+
+### Final Model Specification
+
+$$\text{Richness} \sim \text{Ecoregion} + \log(\text{Num\_pc}) + \text{Num.hab} + \text{Year} + (1 \mid \text{CollectorXyear})$$
+
+#### **Model components**
+
+-   **Response**: Non-asymptotic species richness at 65% sample coverage
+
+-   **Fixed effects**: Ecoregion (categorical), log-number of point counts per farm (Num_pc), number of habitat types surveyed per farm (Num.hab), and year
+
+    -   Other variables like temperature and precipitation were excluded due to high collinearity with Ecoregion
+
+-   **Random intercept**: CollectorXyear groups observations by data collector and survey year, capturing differences in observer ability or protocol through time not captured directly in the Chao estimate of diversity
+
+```{r}
+#| label: run-models
+#| include: false
+
+### Model comparisons (not shown in output)
+## Poisson
+glm_p <- glm(No_Asy_TD ~ Uniq_db + Ecoregion + Num.hab + Num_pc_log, 
+             data = df.a.l$Richness, family = "poisson")
+performance::check_overdispersion(glm_p)
+
+## Quasi-poisson
+glm_qp <- glm(No_Asy_TD ~ Uniq_db + Ecoregion + Num.hab + Num_pc_log, 
+              data = df.a.l$Richness, family = "quasipoisson")
+performance::check_overdispersion(glm_qp)
+
+## Negative binomial from MASS
+glm_nb <- MASS::glm.nb(No_Asy_TD ~ Uniq_db + Ecoregion + Num.hab + Num_pc_log, 
+                       data = df.a.l$Richness)
+```
+
+```{r}
+#| label: fit-final-model
+#| include: false
+
+glmm_nb <- glmer.nb(No_Asy_TD ~ Ecoregion + Num_pc_log + Num.hab + Year + (1 | CollectorXyear), data = df.a.l$Richness)
+```
+
+# Results
+
+## Model Fit
+
+The negative binomial GLMM converged successfully with no evidence of residual overdispersion (dispersion ratio = 1). Several model R² estimates indicate that the model explains approximately 79% of variance in farm-level richness (packages MuMIn and performance).
+
+```{r}
+#| label: variance-explained
+#| include: false
+
+performance::check_overdispersion(glmm_nb)
+
+cat("Conditional and Marginal R-squared (MuMIn):\n")
+print(MuMIn::r.squaredGLMM(glmm_nb))
+
+cat("\n\nAdditional R-squared estimates (performance):\n")
+print(performance::r2(glmm_nb))
+
+cat("\n\nVariance Inflation Factors:\n")
+print(car::vif(glmm_nb))
+```
+
+The **conditional R²** (0.79) represents total variance explained by fixed and random effects combined. The **marginal R²** (0.66) reflects fixed effects alone. The 13-percentage-point difference indicates that the random intercept for collector-year combinations accounts for \~13% of the variance. Variance inflation factors are near 1 indicating that multicollinearity is not problematic.
+
+## Random Effects
+
+```{r}
+#| label: fig-re
+#| fig-cap: Random intercepts by data collector and year combination.
+#| echo: false
+
+sjPlot::plot_model(glmm_nb, type = "re")
+```
+
+The random intercepts exhibit modest but meaningful variation across collector-year combinations. This reflects differences in sampling protocol, effort, and data quality among collectors and years that are not fully captured by the fixed effects.
+
+## Fixed Effects
+
+### Ecoregion
+
+```{r}
+#| label: fig-me-ecoregion
+#| fig-cap: Predicted species richness per farm across five ecoregions, with other variables held at their mean values. Ecoregion is the dominant predictor, capturing broad biogeographic patterns.
+#| echo: false
+
+plot(ggpredict(glmm_nb, "Ecoregion", bias_correction = TRUE))
+```
+
+Ecoregion is the strongest predictor of richness, with predicted values differing by as much as 25 species across regions (Cafetera - Boyaca / Santander). This likely reflects distinct species pools, climate regimes, and habitat availability. The effect is plausible and aligns with known biogeographic patterns in tropical bird diversity.
+
+### Sampling Effort: Number of Point Counts
+
+```{r}
+#| label: fig-me-num-pc
+#| fig-cap: Logged number of point counts strongly predicts estimated richness.
+#| echo: false
+
+plot(ggpredict(glmm_nb, "Num_pc_log"))
+```
+
+The log-number of unique point count locations is a strong positive predictor of richness (Figure 5). This finding reflects a key limitation in how iNEXT standardizes effort: rarefaction curves are constructed using total individuals (or sample coverage) as the effort metric regardless of how those individuals were spatially sampled. A collector surveying one point location four times would accumulate roughly the same total individual count as a collector surveying four locations once each - yet the latter encounters greater landscape heterogeneity and likely registers more species. The positive coefficient here is not a statistical artifact but rather reflects genuine ecological heterogeneity: farms with point counts distributed across more locations sample the broader farm landscape and encounter more species. This is an important caveat for comparative diversity studies using iNEXT.
+
+### Number of Habitats
+
+The number of distinct habitat types surveyed (1, 2, or 3+ habitats) explains little variation in diversity, possibly because the log-number of unique point count locations is similar but more important.
+
+# Conclusions
+
+Nearly all variation in farm-level species richness (79%) is explained by two broad factors:ecoregion and spatial sampling intensity. Fixed effects alone account for 66% of variance. This finding suggests that farm-level management practices - diversification intensity, specific habitat types, agricultural practices - may contribute relatively little additional predictive power at the current spatial (and analytical) resolution. Before concluding that farm management is unimportant, a key next step would be to remove ecoregion and include climatic variables plus farm diversity metrics. If farm diversification practices are relatively consistent *within* an ecoregion, but different *between* ecoregions, then the Ecoregion covariate is likely soaking up variation that could be explained due to farm diversification practices.
+
+## Additional future work
+
+-   **Sensitivity analyses**
+
+    -   **iNEXT sample coverage:** Particularly regarding removal of the 9 assemblages with \< 65% sample coverage. This was an arbitrary threshold and lacks strong justification. Expert guidance on minimum coverage levels would strengthen confidence in the rarefied estimates and the robustness of results to this threshold choice.
+
+    -   **Hill numbers:** This should be done with Shannon's and Simpson's diversity as well, although high correlations with species richness suggest there will be similar results.
+
+-   **Causal interpretation**: The fixed effects presented here represent associations, not causal effects. Any future work trying to understand the causal effect of farm diversification should construct a DAG and leverage the appropriate adjustment set.
+
+-   **Model assumptions:** We should still check model assumptions via residual plots.
+
+## Caveats
+
+-   **Non-independence:** I tried to fit farm ID as a random effect but the model did not converge. So there are multiple observations for farms that were surveyed in multiple years or by multiple data collectors, violating the assumption of independence.
+
+-   **GLMM familiarity:** I have not spent a lot of time working with GLMMs so it is possible that I am misinterpreting the model results or diagnostics somewhere. I was unfamiliar with the calculation of the $R^2$ methods for these models previously.
