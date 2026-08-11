@@ -235,13 +235,13 @@ $$\text{Richness} \sim \text{Ecoregion} + \log(\text{Num\_pc}) + \text{Num.hab} 
 
 #### **Model components**
 
--   **Response**: Non-asymptotic species richness at 65% sample coverage
+- **Response**: Non-asymptotic species richness at 65% sample coverage
 
--   **Fixed effects**: Ecoregion (categorical), log-number of point counts per farm (Num_pc), number of habitat types surveyed per farm (Num.hab), and year
+- **Fixed effects**: Ecoregion (categorical), log-number of point counts per farm (Num_pc), number of habitat types surveyed per farm (Num.hab), and year
 
-    -   Other variables like temperature and precipitation were excluded due to high collinearity with Ecoregion
+  - Other variables like temperature and precipitation were excluded due to high collinearity with Ecoregion
 
--   **Random intercept**: CollectorXyear groups observations by data collector and survey year, capturing differences in observer ability or protocol through time not captured directly in the Chao estimate of diversity
+- **Random intercept**: CollectorXyear groups observations by data collector and survey year, capturing differences in observer ability or protocol through time not captured directly in the Chao estimate of diversity
 
 ```{r}
 #| label: run-models
@@ -342,18 +342,18 @@ Nearly all variation in farm-level species richness (79%) is explained by two br
 
 ## Additional future work
 
--   **Sensitivity analyses**
+- **Sensitivity analyses**
 
-    -   **iNEXT sample coverage:** Particularly regarding removal of the 9 assemblages with \< 65% sample coverage. This was an arbitrary threshold and lacks strong justification. Expert guidance on minimum coverage levels would strengthen confidence in the rarefied estimates and the robustness of results to this threshold choice.
+  - **iNEXT sample coverage:** Particularly regarding removal of the 9 assemblages with \< 65% sample coverage. This was an arbitrary threshold and lacks strong justification. Expert guidance on minimum coverage levels would strengthen confidence in the rarefied estimates and the robustness of results to this threshold choice.
 
-    -   **Hill numbers:** This should be done with Shannon's and Simpson's diversity as well, although high correlations with species richness suggest there will be similar results.
+  - **Hill numbers:** This should be done with Shannon's and Simpson's diversity as well, although high correlations with species richness suggest there will be similar results.
 
--   **Causal interpretation**: The fixed effects presented here represent associations, not causal effects. Any future work trying to understand the causal effect of farm diversification should construct a DAG and leverage the appropriate adjustment set.
+- **Causal interpretation**: The fixed effects presented here represent associations, not causal effects. Any future work trying to understand the causal effect of farm diversification should construct a DAG and leverage the appropriate adjustment set.
 
--   **Model assumptions:** We should still check model assumptions via residual plots.
+- **Model assumptions:** We should still check model assumptions via residual plots.
 
 ## Caveats
 
--   **Non-independence:** I tried to fit farm ID as a random effect but the model did not converge. So there are multiple observations for farms that were surveyed in multiple years or by multiple data collectors, violating the assumption of independence.
+- **Non-independence:** I tried to fit farm ID as a random effect but the model did not converge. So there are multiple observations for farms that were surveyed in multiple years or by multiple data collectors, violating the assumption of independence.
 
--   **GLMM familiarity:** I have not spent a lot of time working with GLMMs so it is possible that I am misinterpreting the model results or diagnostics somewhere. I was unfamiliar with the calculation of the $R^2$ methods for these models previously.
+- **GLMM familiarity:** I have not spent a lot of time working with GLMMs so it is possible that I am misinterpreting the model results or diagnostics somewhere. I was unfamiliar with the calculation of the $R^2$ methods for these models previously.
