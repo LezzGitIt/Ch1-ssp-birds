@@ -69,3 +69,9 @@ rsconnect/
 
 # Running model-run log (binary, changes every session)
 spOcc_model_notes.xlsx
+
+# Local scratch scripts (not part of the pipeline)
+Extra_scripts/
+
+# Project notes (local working record)
+Project_notes.md
