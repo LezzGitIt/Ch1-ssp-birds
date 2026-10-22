@@ -272,9 +272,9 @@ if(Habitat_split_i){
 # Remove Habitat_sub 
 Site_covs3 <- Site_covs2 %>% select(-Habitat_sub) 
 
-if(Pc_Habitat_i == "Gradient"){
+if(Pc_Habitat_i %in% c("Gradient", "All")){
   Site_covs3 <- Site_covs3 %>% 
-    mutate(Habitat = fct_relevel(Habitat, c("Mosaic", "Pastizales", "Ssp", "Bosque"))) #"Bosque ripario")
+    mutate(Habitat = fct_relevel(Habitat, c("Pastizales", "Mosaic", "Ssp", "Bosque"))) #"Bosque ripario")
 }
 
 # Scale numeric values, create numeric random effects
@@ -284,7 +284,7 @@ Site_covs4 <- Site_covs3 %>%
          Id_group_no_dc = as.numeric(Id_group_no_dc),
          Id_scr = as.numeric(Id_scr))
 
-if(Pc_Habitat_i == "Forest") {
+if(Pc_Habitat_i %in% c("Forest", "All")) {
   Site_covs4 <- Site_covs4 %>% 
     mutate(
       Ecoregion_num = as.numeric(Ecoregion),
