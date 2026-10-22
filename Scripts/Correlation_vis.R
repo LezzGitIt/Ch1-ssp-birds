@@ -8,6 +8,10 @@ library(chron)
 library(gridExtra)
 library(mvnormtest)
 library(conflicted)
+library(tidyterra)
+library(terra)
+library(ggspatial)
+ggplot2::theme_set(cowplot::theme_cowplot())
 conflicts_prefer(dplyr::select)
 conflicts_prefer(dplyr::filter)
 conflicts_prefer(purrr::map)
@@ -27,7 +31,9 @@ Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv")) %>%
 # >Subset -----------------------------------------------------------------
 Forest <- FALSE
 
-if(!Forest){
+if(Forest){
+  Site_covs <- Site_covs %>% filter(Habitat == "Bosque")
+} else if(!Forest){
   Site_covs <- Site_covs %>% filter(Ecoregion == "Piedemonte")
 }
 
@@ -66,6 +72,47 @@ Event_covs %>%
 # Occupancy covs
 GGally::ggcorr(Site_covs2, label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
 
+# Plot correlation between categorical Habitat and continuous predictor variables in causal model 
+plot_cat_cor <- function(df, cat_x, y_var, y_title) {
+  df %>% distinct({{ cat_x }}, {{ y_var }}) %>%
+    ggplot(aes(x = {{ cat_x }}, y = {{ y_var }})) + 
+    geom_boxplot(outliers = FALSE) +
+    geom_jitter(width = 0.05, alpha = .4) + 
+    labs(x = NULL, y = y_title)
+}
+# Remove Habitat = "Mosaic"? 
+Site_covs2 %>% plot_cat_cor(cat_x = Habitat, y_var = ssp, y_title = "Silvopasture (300m)")
+Site_covs2 %>% #filter(Habitat != "Mosaic") %>% 
+  plot_cat_cor(cat_x = Habitat, y_var = Tot_prec, y_title = "Precipitation (mm)")
+Site_covs2 %>% 
+  plot_cat_cor(cat_x = Habitat, y_var = Dist_forest, y_title = "Distance to forest (m)")
+Site_covs2 %>% plot_cat_cor(cat_x = Habitat, y_var = Canopy_cover, y_title = "Forest in 1km")
+Site_covs2 %>% plot_cat_cor(cat_x = Habitat, y_var = Ano, y_title = "Year")
+
+# Spatial -----------------------------------------------------------------
+## Plot environmental variables to think about spatial autocorrelation
+plot_spatial <- function(df, var, Mosaic = FALSE){
+  if(!Mosaic){ df  <- df %>% filter(Habitat != "Mosaic") }
+    df  %>% terra::vect(geom=c("Long", "Lat")) %>% 
+    agitate(maxdist = .013) %>%
+    filter(Ecoregion == "Piedemonte") %>%
+    ggplot(aes(color = {{ var }})) +
+    geom_spatvector(pch = 1, alpha = .8)
+}
+
+# Plot
+covs_spat_p <- list()
+covs_spat_p[[1]] <- plot_spatial(df = Site_covs2, Habitat)
+covs_spat_p[[2]] <- plot_spatial(df = Site_covs2, Tot_prec)
+covs_spat_p[[3]] <- plot_spatial(df = Site_covs2, Canopy_cover)
+covs_spat_p[[4]] <- plot_spatial(df = Site_covs2, Dist_forest)
+covs_spat_p[[5]] <- plot_spatial(df = Site_covs2, ssp)
+covs_spat_p[[6]] <- plot_spatial(df = Site_covs2, Ano)
+
+patchwork::wrap_plots(covs_spat_p, ncols = 3)
+
+# EXTRAS ------------------------------------------------------------------
+stop()
 Site_covs2 %>% 
   select(where(is.double)) %>%
   GGally::ggpairs()
