@@ -17,8 +17,12 @@ conflicts_prefer(dplyr::select)
 conflicts_prefer(dplyr::filter)
 conflicts_prefer(base::match)
 
+# Functions
+source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Academia/Rcookbook/Themes_funs.R")
+
 # Load data ---------------------------------------------------------------
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
+External_path <- "../../../Datasets_external/"
 Excels <- "Derived/Excels/"
 
 ## NOTE: Removing Hatico points until can digitize
@@ -27,6 +31,8 @@ Hatico_pc_nums <- str_pad(1:12, width = 2, pad = 0)
 Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv"))
 Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>% 
   filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums))
+
+load(paste0(Wrangling_repo, "Rdata/NE_layers_Colombia.Rdata"))
 
 # >Subset -----------------------------------------------------------------
 Subset_tbl <- expand_grid(
@@ -65,13 +71,25 @@ if(Pc_Habitat_i == "Forest"){
     #filter(Uniq_db != "Cipav mbd") %>%
     select(-Habitat)
 } else if(Pc_Habitat_i == "Gradient"){
+  Site_covs_join <- Site_covs %>% 
+    select("Id_muestreo_no_dc", "Ecoregion", "Nombre_finca", "Habitat")
   Event_covs <- Event_covs %>% 
-    left_join(Site_covs[,c("Id_muestreo_no_dc", "Ecoregion", "Nombre_finca")]) %>% 
-    filter(Ecoregion == "Piedemonte") #%>% 
-  #filter(Nombre_institucion != "Cipav")
+    left_join(Site_covs_join) %>% 
+    filter(Ecoregion == "Piedemonte")
   #filter(Pc_start < as_hms("12:00:00"))
 } else if(Pc_Habitat_i == "All"){
-  Event_covs
+  Event_covs 
+}
+
+Mosaic <- FALSE
+if(!Mosaic){
+  Event_covs <- Event_covs %>% 
+    filter(Habitat != "Mosaic")
+}
+
+Cipav_i <- FALSE
+if(!Cipav_i){
+  Event_covs <- Event_covs %>% filter(Nombre_institucion != "Cipav")
 }
 
 # Use semi_join to subset relevant point counts
@@ -89,15 +107,12 @@ Ft <- read_csv(paste0(Wrangling_repo, Excels, "Traits/Functional_traits.csv"))
 
 # Breeding records matrix from Moreno-palacios
 Breed_records <- read_csv(
-  "../Datasets_external/Palacios_breeding_database.csv"
-) %>% 
-  mutate(across(where(is.character), as.factor), 
+  paste0(External_path, "Palacios_breeding_database.csv")
+) %>%
+  mutate(across(where(is.character), as.factor),
          date = paste(year, month, day, sep = "-"),
          date = as.Date(date, format = "%Y-%m-%d"),
          doy = yday(date))
-
-load(paste0(Wrangling_repo, "Rdata/NE_layers_Colombia.Rdata")) 
-source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
 
 # Plot precipitation within Meta 
 library(tidyterra)
@@ -246,8 +261,10 @@ if(Habitat_split_i){
       Habitat_sub == "Ripario" ~ "Bosque ripario",
       Habitat == "Ssp" ~ paste0(Habitat, "-", Habitat_sub), 
       .default = Habitat
-    )) %>% mutate(Habitat = ifelse(
-      Habitat == "Ssp-Intensivo", "Ssp-Arboles dispersos", Habitat
+    )) %>% mutate(Habitat = case_when(
+      Habitat == "Ssp-Intensivo" ~ "Ssp-Arboles dispersos",
+      Habitat %in% c("Ssp-Banco de forraje", "Ssp-Setos") ~ "Ssp-Setos forrajeros",
+      .default = Habitat
     )) %>%
     select(-Habitat_sub) 
 }
