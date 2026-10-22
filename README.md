@@ -1,12 +1,12 @@
 # Silvopasture and Bird Diversity in Colombia
 
-This repository contains the code and data associated with my PhD dissertation, examining the impact of silvopasture on bird taxonomic and functional diversity in fragmented landscapes of Colombia. The project aims to explore how local landcover and land-use impact bird diversity, and how these relationships are moderated by landscape and environmental factors.
+This repository contains the code and data associated with the first chapter of my PhD dissertation, examining the impact of silvopasture on bird taxonomic and functional diversity in fragmented landscapes of Colombia. The project aims to explore how local landcover and land-use impact bird diversity, and how these relationships are moderated by landscape and environmental factors.
 
-## Project Overview
+## Chapter Overview
 
-As part of the Sustainable Cattle Ranching (SCR) project, this research uses data from 485 unique point count sites collected over a decade to model multi-species occupancy and abundance. The study seeks to:
+As part of the Sustainable Cattle Ranching (SCR) project, this research uses data from 500+ unique point count sites collected over a decade to model multi-species occupancy and abundance. The study seeks to:
 
-- Understand how silvopasture, a system combining productive trees and shrubs with pastoral land, influences bird taxonomic and functional diversity over time.
+- Understand how silvopasture, a system combining productive trees and shrubs with pastoral land, influences bird taxonomic and functional(?) diversity through time.
 - Generate recommendations regarding the optimal amount and configuration of on-farm tree cover to maintain key ecosystem services. 
 - Explore key hypotheses such as the 'dominance of beta diversity' and 'intermediate landscape complexity' hypotheses in the context of fragmented landscapes in Colombia
 
@@ -14,7 +14,7 @@ The goal is to provide actionable insights for biodiversity conservation in the 
 
 ## Methodology
 
-- **Data**: 485 point count sites collected over a decade.
+- **Data**: 500+ point count sites collected over a decade.
 - **Analysis**: Bayesian multi-species occupancy / abundance models, alpha and beta diversity, community composition, functional diversity metrics
 
 ## Usage

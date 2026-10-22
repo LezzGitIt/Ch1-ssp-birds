@@ -65,3 +65,7 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+.positai
+
+# Running model-run log (binary, changes every session)
+spOcc_model_notes.xlsx
