@@ -34,8 +34,8 @@ Excels <- "Derived/Excels/"
 Hatico_pc_nums <- str_pad(1:12, width = 2, pad = 0)
 
 Pc_locs_dc_sf <- st_read(
-  paste0(Wrangling_repo, "Derived_geospatial/shp/Pc_locs_dc.gpkg")
-) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
+  paste0(Wrangling_repo, "Derived/Geospatial/shp/Pc_locs_dc.gpkg")
+) %>% filter(!Id_survey_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) 
 
 Forest <- FALSE
 
@@ -521,7 +521,7 @@ Term_labels <- c(
   "(Intercept)" = "Intercept",
   HabitatPastizales = "Pasture", HabitatBosque = "Forest", "HabitatBosque ripario" = "Riparian forest", HabitatSsp = "Silvopasture", HabitatMosaic = "Mosaic",
   "HabitatSsp-Arboles dispersos" = "Dispersed trees", "HabitatSsp-Setos" = "Live fence", "HabitatSsp-Setos forrajeros" = "Fodder hedges",
-  Tot_prec = "Precipitation", ssp = "Silvopasture (300 m)", Canopy_cover = "Forest (1 km)", Dist_forest = "Distance to forest", Ano1 = "Year", Elev = "Elevation", te = "Total edge"
+  Tot_prec = "Precipitation", ssp = "Silvopasture (300 m)", Canopy_cover = "Forest (1 km)", Dist_forest = "Distance to forest", Ano1 = "Year", Year1 = "Year", Elev = "Elevation", te = "Total edge"
 )
 
 # Plot - occupancy (translated names)

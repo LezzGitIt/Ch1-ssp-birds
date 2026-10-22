@@ -19,6 +19,7 @@ conflicts_prefer(base::match)
 
 # Functions
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Academia/Rcookbook/Themes_funs.R")
+source("Scripts/spOcc_fns.R")
 
 # Load data ---------------------------------------------------------------
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
@@ -28,9 +29,15 @@ Excels <- "Derived/Excels/"
 ## NOTE: Removing Hatico points until can digitize
 Hatico_pc_nums <- str_pad(1:12, width = 2, pad = 0)
 
+## INTERIM: landscape metrics (Dist_forest, ssp, te) are no longer in the wrangling repo's Event_covs, so read them from its frozen export until Extract_lcs.R / LSM.R move into this repo
+Lsm_interim <- read_lsm_interim(Wrangling_repo)
+
 Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv"))
-Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>% 
-  filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums))
+Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>%
+  filter(!Id_survey_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>%
+  left_join(Lsm_interim, by = c("Id_survey", "Year")) %>%
+  # INTERIM: Id_group_no_dc (farm x research question) was dropped upstream; rebuild it by removing the collector prefix from Id_group (e.g. "G-MB-M-A" -> "MB-M-A") until the farm and location random intercepts replace it
+  mutate(Id_group_no_dc = str_remove(Id_group, "^[^-]+-"))
 
 load(paste0(Wrangling_repo, "Rdata/NE_layers_Colombia.Rdata"))
 
@@ -38,10 +45,12 @@ load(paste0(Wrangling_repo, "Rdata/NE_layers_Colombia.Rdata"))
 Subset_tbl <- expand_grid(
   Pc_Habitat = c("Forest", "Gradient", "All"),
   Spp_subset = c("Forest", "All", "Nonforest"),
-  Habitat_split = c(TRUE, FALSE)
+  Habitat_split = c(TRUE, FALSE) 
+  #Cipav = c(TRUE, FALSE)
 ) %>%
   mutate(
     Subset_i = row_number(),
+    # The 'Order_' vectors are defined in the '>Ordering' section
     Spp_order = case_when(
       Pc_Habitat == "Gradient" & Spp_subset == "Forest" ~ "Order_meta_forest",
       Pc_Habitat == "Gradient" & Spp_subset == "All" ~ "Order_meta",
@@ -51,28 +60,29 @@ Subset_tbl <- expand_grid(
     )
     # Reorder columns
   ) %>% select(Subset_i, everything())
-Subset_tbl
+Subset_tbl #%>% view()
 
 i <- 9 # 3, 9, 15
-Subset_cfg <- Subset_tbl %>% slice(i)
+Subset_cfg <- Subset_tbl %>%
+  #filter(Pc_Habitat == "Gradient" & Spp_subset == "All" & Habitat_split == FALSE) #%>% 
+  slice(i)
 
 Pc_Habitat_i <- Subset_cfg %>% pull(Pc_Habitat)
 Spp_subset_i <- Subset_cfg %>% pull(Spp_subset)
 Habitat_split_i <- Subset_cfg %>% pull(Habitat_split)
 Spp_order_i <- Subset_cfg %>% pull(Spp_order)
-
 Subset_cfg
 
 ## Subset Event_covs, which subsets the other datasets
+# REMOVE HABITAT IN LEFT_JOIN AND FILTER
 if(Pc_Habitat_i == "Forest"){
   Event_covs <- Event_covs %>% 
-    left_join(Site_covs[,c("Id_muestreo_no_dc", "Habitat")]) %>% 
+    left_join(Site_covs[,c("Id_survey_no_dc", "Habitat")]) %>% 
     filter(Habitat == "Bosque") %>%  
-    #filter(Uniq_db != "Cipav mbd") %>%
     select(-Habitat)
 } else if(Pc_Habitat_i == "Gradient"){
   Site_covs_join <- Site_covs %>% 
-    select("Id_muestreo_no_dc", "Ecoregion", "Nombre_finca", "Habitat")
+    select("Id_survey_no_dc", "Ecoregion", "Farm_name", "Habitat")
   Event_covs <- Event_covs %>% 
     left_join(Site_covs_join) %>% 
     filter(Ecoregion == "Piedemonte")
@@ -89,20 +99,20 @@ if(!Mosaic){
 
 Cipav_i <- FALSE
 if(!Cipav_i){
-  Event_covs <- Event_covs %>% filter(Nombre_institucion != "Cipav")
+  Event_covs <- Event_covs %>% filter(Institution_name != "Cipav")
 }
 
 # Use semi_join to subset relevant point counts
 Site_covs <- Site_covs %>% semi_join(Event_covs)
 Bird_pcs_analysis <- read_csv(
   paste0(Wrangling_repo, Excels, "Bird_pcs/Bird_pcs_analysis.csv")
-) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>%
+) %>% filter(!Id_survey_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>%
   semi_join(Event_covs)
 Pc_locs_dc_sf <- st_read(
-  paste0(Wrangling_repo, "Derived_geospatial/shp/Pc_locs_dc.gpkg")
-) %>% filter(!Id_muestreo_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>% 
+  paste0(Wrangling_repo, "Derived/Geospatial/shp/Pc_locs_dc.gpkg")
+) %>% filter(!Id_survey_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>% 
   semi_join(Site_covs) #%>% 
-#filter(Nombre_institucion != "Cipav" & Ecoregion == "Piedemonte")
+#filter(Institution_name != "Cipav" & Ecoregion == "Piedemonte")
 Ft <- read_csv(paste0(Wrangling_repo, Excels, "Traits/Functional_traits.csv"))
 
 # Breeding records matrix from Moreno-palacios
@@ -114,23 +124,16 @@ Breed_records <- read_csv(
          date = as.Date(date, format = "%Y-%m-%d"),
          doy = yday(date))
 
-# Plot precipitation within Meta 
-library(tidyterra)
-Site_covs_vec <- Site_covs %>% terra::vect(geom=c("Long", "Lat")) %>% 
-  filter(Ecoregion == "Piedemonte") 
-ggplot(data = Site_covs_vec, aes(color = Tot_prec)) +
-  geom_spatvector()
-
 # Row identifier ----------------------------------------------------------
 Event_covs %>% 
-  select(Id_muestreo, Ano_grp, N_samp_periods, Season, 
+  select(Id_survey, Year_grp, N_samp_periods, Season, 
          contains("rep", ignore.case = TRUE)) 
 
 #NOTE:: The unique row identifier  [e.g. ID x Year] is critical , this defines what a row is in your dataframes and how many rows each dataframe will have 
-Row_identifier <- c("Id_muestreo", "Ano_grp", "Season") #, "Season"
+Row_identifier <- c("Id_survey", "Year_grp", "Season") #, "Season"
 
 # NOTE:: This is a REMINDER, need to replace all 'Rep ano grp' with 'Rep season' and viceaversa depending on whether "Season" is included in the Row_identifier
-Rep_identifier <- "Season" # Ano_grp
+Rep_identifier <- "Season" # Year_grp
 paste0("Rep_", Rep_identifier)
 
 # Final formatting --------------------------------------------------------
@@ -138,9 +141,9 @@ Bird_pcs_analysis2 <- Bird_pcs_analysis %>%
   mutate(Species_ayerbe_ = str_replace_all(Species_ayerbe, " ", "_"))
 
 ## Add Rep_season to tbl 
-# Pc_start & Rep_season are equivalent in terms of grouping (when combined with Id_muestreo & Ano_grp), but since we are using Rep_season for formatting of analysis dataframes it makes sense to include Rep_season as well
+# Pc_start & Rep_season are equivalent in terms of grouping (when combined with Id_survey & Year_grp), but since we are using Rep_season for formatting of analysis dataframes it makes sense to include Rep_season as well
 date_join_spp_obs <- Event_covs %>% 
-  select(Id_muestreo, Ano_grp, Season, Fecha, Pc_start, Rep_season)
+  select(Id_survey, Year_grp, Season, Date, Pc_start, Rep_season)
 Bird_pcs_analysis3 <- Bird_pcs_analysis2 %>% 
   left_join(date_join_spp_obs)
 
@@ -148,18 +151,14 @@ Bird_pcs_analysis3 <- Bird_pcs_analysis2 %>%
 ## Join with functional traits 
 Ft_abu <- Bird_pcs_analysis3 %>% 
   count(Species_ayerbe, sort = T) %>% 
-  left_join(Ft) %>%
-  # Create habitat type, forest vs non-forest
-  mutate(Habitat2 = if_else(
-    Habitat %in% c("Forest", "Woodland", "Riverine"), "Forest", "Non-forest"
-  ))
+  left_join(Ft)
 
-## Set minimum number of distinct point counts which in turn sets the number of species
+## Set minimum number of distinct point count locations which in turn sets the number of species
 Num_locs_cutoff <- 0
 Ft_abu2 <- Ft_abu %>% mutate(In_out = if_else(n >= Num_locs_cutoff, "In", "Out"))
 Ft_abu3 <- Ft_abu2 %>% filter(In_out == "In")
 
-if(Spp_subset_i == "Forest") {
+if(Spp_subset_i == "Forest"){
   Ft_abu3 <- Ft_abu3 %>% 
     filter(Habitat %in% c("Forest", "Woodland", "Riverine")) # "Riverine"
   # Subset non-forest species (81)
@@ -169,6 +168,7 @@ if(Spp_subset_i == "Forest") {
   Ft_abu3 <- Ft_abu3 %>% 
     filter(!Habitat %in% c("Forest", "Woodland", "Riverine"))
 }
+Ft_abu3 %>% pull(Species_ayerbe) %>% unique()
 nrow(Ft_abu3)
 
 In_out_compare_plot <- function(var){
@@ -186,7 +186,9 @@ In_out_compare_plot <- function(var){
 }
 In_out_compare_plot(Trophic.Niche)
 In_out_compare_plot(Trophic.Level)
-In_out_compare_plot(Habitat2)
+In_out_compare_plot(Forest_bin)
+In_out_compare_plot(Migration_avo)
+In_out_compare_plot(Habitat.Density)
 
 Ft_abu %>% anti_join(Ft_abu2) %>% 
   tabyl(Trophic.Niche) #Trophic.Level
@@ -222,7 +224,7 @@ Ft_abu4 %>% ggplot() +
   geom_histogram(aes(x = Mass))
 
 ## Select species order
-Order_spp <- c("Tyrannus_melancholicus", "Synallaxis_azarae", "Milvago_chimachima", "Thraupis_episcopus", "Camptostoma_obsoletum", "Volatina_jacarina", "Troglodytes_aedon", "Pitangus_sulphuratus", "Bubulcus_ibis") # Other options could include "Milvago_chimachima", "Pteroglossus_castanotis", Ortalis_garrula, Manacus_manacus, Todirostrum_cinereum,  Columbina_talpacoti, Pitangus_sulphuratus
+Order_spp <- c("Tyrannus_melancholicus", "Synallaxis_azarae", "Milvago_chimachima", "Thraupis_episcopus", "Camptostoma_obsoletum", "Troglodytes_aedon", "Pitangus_sulphuratus", "Bubulcus_ibis") # Other options could include "Milvago_chimachima", "Pteroglossus_castanotis", Ortalis_garrula, Manacus_manacus, Todirostrum_cinereum,  Columbina_talpacoti, Pitangus_sulphuratus
 Order_meta <- c("Tyrannus_melancholicus", "Manacus_manacus", "Milvago_chimachima", "Pitangus_sulphuratus", "Crotophaga_ani", "Troglodytes_aedon", "Camptostoma_obsoletum", "Columbina_talpacoti", "Volatinia_jacarina")
 Order_meta_no_forest <- c("Tyrannus_melancholicus", "Milvago_chimachima", "Pitangus_sulphuratus", "Crotophaga_ani", "Troglodytes_aedon", "Camptostoma_obsoletum", "Columbina_talpacoti", "Volatinia_jacarina")
 Order_meta_forest <- c("Rupornis_magnirostris", "Crotophaga_major", "Thraupis_palmarum", "Mesembrinibis_cayennensis", "Dendrocincla_fuliginosa", "Gymnomystax_mexicanus", "Patagioenas_cayennensis", "Pteroglossus_castanotis", "Amazona_ochrocephala") # "Cercomacroides_tyrannina", Manacus_manacus"
@@ -233,9 +235,9 @@ Order_forest2 <- c("Synallaxis_azarae", "Turdus_fuscater", "Rupornis_magnirostri
 Order_meta_no_forest %in% Bird_pcs_analysis4$Species_ayerbe_
 
 # Site covariates ---------------------------------------------------------
-## Covariates that are fixed for a given point count x Ano_grp combination
+## Covariates that are fixed for a given point count x Year_grp combination
 date_join_ano <- Event_covs %>% 
-  distinct(Id_muestreo_no_dc, across(all_of(Row_identifier)), Ano, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
+  distinct(Id_survey_no_dc, Id_group_no_dc, across(all_of(Row_identifier)), Year, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
 
 Site_covs2 <- Site_covs %>%
   full_join(date_join_ano) %>% 
@@ -243,17 +245,17 @@ Site_covs2 <- Site_covs %>%
   mutate(
     Habitat = if_else(Habitat == "Cultivos", "Mosaic", Habitat)
   ) %>% 
-  # Some GAICA points were sampled 2x in a single Ano_grp across different years. Take the measurement from 2016.
-  slice_max(by = all_of(Row_identifier), order_by = Ano) %>%
+  # Some GAICA points were sampled 2x in a single Year_grp across different years. Take the measurement from 2016.
+  slice_max(by = all_of(Row_identifier), order_by = Year) %>%
   arrange(across(all_of(Row_identifier))) %>%
-  mutate(Id_gcs = ifelse(Id_group_no_dc == "MB-R-OQ", "Oq_farm_id", Id_gcs)) %>%
+  mutate(Id_scr = ifelse(Id_group_no_dc == "MB-R-OQ", "Oq_farm_id", Id_scr)) %>%
   mutate(
     # Take the earlier of the two years so it is numeric
-    Ano1 = as.numeric(str_split_i(Ano_grp, "-", 1)),
+    Year1 = as.numeric(str_split_i(Year_grp, "-", 1)),
     across(where(is.character), as.factor),
     Ecoregion = relevel(Ecoregion, ref = "Piedemonte")
   ) %>%
-  select(all_of(Row_identifier), Ano1, Id_gcs, Id_group_no_dc, Uniq_db, Departamento, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
+  select(all_of(Row_identifier), Year1, Id_scr, Id_group_no_dc, Uniq_db, Department, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
 
 if(Habitat_split_i){
   Site_covs2 <- Site_covs2 %>% 
@@ -265,28 +267,28 @@ if(Habitat_split_i){
       Habitat == "Ssp-Intensivo" ~ "Ssp-Arboles dispersos",
       Habitat %in% c("Ssp-Banco de forraje", "Ssp-Setos") ~ "Ssp-Setos forrajeros",
       .default = Habitat
-    )) %>%
-    select(-Habitat_sub) 
+    )) 
 }
+# Remove Habitat_sub 
+Site_covs3 <- Site_covs2 %>% select(-Habitat_sub) 
 
 if(Pc_Habitat_i == "Gradient"){
-  Site_covs2 <- Site_covs2 %>% 
+  Site_covs3 <- Site_covs3 %>% 
     mutate(Habitat = fct_relevel(Habitat, c("Mosaic", "Pastizales", "Ssp", "Bosque"))) #"Bosque ripario")
 }
 
-
 # Scale numeric values, create numeric random effects
-Site_covs3 <- Site_covs2 %>%
+Site_covs4 <- Site_covs3 %>%
   mutate(across(where(is.numeric), ~ as.numeric(scale(.))), 
          # Categorical random effects have to be specified as numeric in spOccupancy
          Id_group_no_dc = as.numeric(Id_group_no_dc),
-         Id_gcs = as.numeric(Id_gcs))
+         Id_scr = as.numeric(Id_scr))
 
 if(Pc_Habitat_i == "Forest") {
-  Site_covs3 <- Site_covs3 %>% 
+  Site_covs4 <- Site_covs4 %>% 
     mutate(
       Ecoregion_num = as.numeric(Ecoregion),
-      Departamento_num = as.numeric(Departamento)
+      Department_num = as.numeric(Department)
     )
 }
 
@@ -294,7 +296,7 @@ if(Pc_Habitat_i == "Forest") {
 # There are two points with Habitat == "Cultivos". These can be removed or can be changed to "Mosaic". Here I change them to "Mosaic", which allows them to be included without biasing any of the landcovers we care more about (ssp, forest)
 
 # Adjust Row_identifier
-#if(any(str_detect(Row_identifier, "Ano_grp"))){
+#if(any(str_detect(Row_identifier, "Year_grp"))){
 #  Row_identifier <- str_replace_all(Row_identifier, "_grp", "1")
 #}
 
@@ -351,7 +353,7 @@ Prob_breed_tbl <- newdat_sites2 %>%
 
 # Join to Event_covs
 Event_covs2 <- Site_covs %>% 
-  select(Id_muestreo_no_dc, Elev, Lat) %>%
+  select(Id_survey_no_dc, Elev, Lat) %>%
   right_join(Event_covs) %>%
   left_join(Prob_breed_tbl) %>% 
   select(-c(Elev, Lat))
@@ -361,36 +363,38 @@ Event_covs2 <- Site_covs %>%
 Site_covs_forest <- Site_covs %>% 
   mutate(Forest_bin = ifelse(Habitat == "Bosque", "Y", "N"))
 Event_covs3 <- Event_covs2 %>% 
-  left_join(Site_covs_forest[,c("Id_muestreo_no_dc", "Forest_bin")]) #%>%
+  left_join(Site_covs_forest[,c("Id_survey_no_dc", "Forest_bin")]) #%>%
 #mutate(Julian_day2 = poly(Julian_day, 2),
 #      Pc_start2 = poly(Pc_start, 2))
 
-# >Registrado_por ---------------------------------------------------------
+# >Registered_by ---------------------------------------------------------
 Event_covs4 <- Event_covs3 %>% 
   mutate(
-    Registrado_por = ifelse(
-      Uniq_db == "Ubc mbd" & Ano_grp == "22",  
+    Registered_by = ifelse(
+      Uniq_db == "Ubc mbd" & Year_grp == "22",  
       "Aaron Alexander Skinner, Santiago Lugo-Enciso", 
-      Registrado_por
+      Registered_by
     ))
 Collector_team_join <- Event_covs4 %>% 
-  distinct(Uniq_db, Ano_grp, Registrado_por) %>% 
+  distinct(Uniq_db, Year_grp, Registered_by) %>% 
   mutate(Team = row_number(), .by = Uniq_db) %>% 
   # For now I just assign the NAs to a 3rd Collector_team. These will have little data so will hopefully get partially pooled towards the average. 
   # TO DO - Consider random sampling of categorical variable instead of assigning to "Unk"
   mutate(Collector_team = paste0(Uniq_db, Team), 
-         Collector_team = ifelse(is.na(Registrado_por), "Unk", Collector_team),
+         Collector_team = ifelse(is.na(Registered_by), "Unk", Collector_team),
          Collector_team_num = row_number()) %>%
   select(-Team) %>% 
   mutate(Collector_team_num = first(Collector_team_num), .by = Collector_team)
-Event_covs5 <- Event_covs4 %>% left_join(Collector_team_join) %>%
+
+Event_covs5 <- Event_covs4 %>% 
+  left_join(Collector_team_join) %>%
   mutate(Collector_team_num = as.factor(Collector_team_num)) #, 
 #Collector_team = as.numeric(Collector_team))
 #sample(unique(Event_covs5$Collector_team), size = 20)
 Event_covs5 %>% distinct(Uniq_db, Collector_team_num)
 
 # >Format ------------------------------------------------------------------
-# Generate Obs_covs_df where each row is a unique ID [Id_muestreo, Ano_grp], each column is a site visit, and the 'Variable' column identifies which Observation covariate the row corresponds to  
+# Generate Obs_covs_df where each row is a unique ID [Id_survey, Year_grp], each column is a site visit, and the 'Variable' column identifies which Observation covariate the row corresponds to  
 # Final touches, scale
 Event_covs6 <- Event_covs5 %>%
   mutate(Rep_season = as.factor(Rep_season), 
@@ -403,7 +407,7 @@ Obs_covs_df <- Event_covs6 %>%
   pivot_longer(
     # Select detection covariates here
     cols = c(
-      Collector_team_num, Julian_day, Prob_breed, Pc_start, Pc_length, Sampling_day_log, Forest_bin #Julian_day2, Pc_start2
+      Collector_team_num, Julian_day, Prob_breed, Pc_start, Pc_duration, Sampling_day_log, Forest_bin #Julian_day2, Pc_start2
     ),      
     names_to = "Variable",          
     values_to = "Value"             
@@ -570,7 +574,7 @@ add_year_join <- Site_covs2 %>% distinct(across(all_of(Row_identifier)))
 
 # Arrange coordinates 
 Coords_arr <- Pc_locs_dc_sf %>% 
-  distinct(Id_muestreo, geom) %>% 
+  distinct(Id_survey, geom) %>% 
   # Add year 
   left_join(add_year_join) %>%
   #anti_join(Rm_tbl) %>%
@@ -646,20 +650,20 @@ Ayerbe_mod_spp <- do.call(rbind, Ayerbe_mod_spp_l2) %>% st_make_valid()
 
 ## Calculate the shortest distance (km) from each point count location to the species range
 Dist_to_pcs <- Pc_locs_dc_sf %>%
-  distinct(Id_muestreo, geom) %>%
+  distinct(Id_survey, geom) %>%
   st_distance(Ayerbe_mod_spp) %>% 
   as_tibble() %>% 
   rename_with(~ Species_list2$Species_ayerbe) %>%
   Cap_snake %>%
   mutate(across(everything(), ~ (.x / 1000) %>% units::drop_units())) %>% 
-  bind_cols(distinct(Pc_locs_dc_sf, Id_muestreo)) %>% 
-  relocate(Id_muestreo, 1)
+  bind_cols(distinct(Pc_locs_dc_sf, Id_survey)) %>% 
+  relocate(Id_survey, 1)
 
 # Plot an example species to see distance (in km)
 if(FALSE){
   # Add Pc_ids & their geometries back in
   Dist_pcs_sf <- Pc_locs_dc_sf %>% 
-    distinct(Id_muestreo, geom) %>% 
+    distinct(Id_survey, geom) %>% 
     full_join(Dist_to_pcs)
   
   Dist_pcs_sf %>% select(Ramphocelus_carbo) %>%
@@ -680,7 +684,7 @@ cutoff <- 15
 
 # Format
 Dist_to_pcs2 <- Dist_to_pcs %>%
-  left_join(add_year_join) %>% # Add Ano_grp 
+  left_join(add_year_join) %>% # Add Year_grp 
   arrange(across(all_of(Row_identifier))) %>%
   unite(Id_muestreo_ano, all_of(Row_identifier), sep = ".", remove = FALSE) %>%
   select(-all_of(Row_identifier))
@@ -697,7 +701,7 @@ Biogeo_clip_mat <- Biogeo_clip %>% as.matrix()
 
 # spOccupancy frame --------------------------------------------------------
 # Multi-species abundance list
-msAbu_l <- list(y = Abund_array, abu.covs = Site_covs3, det.covs = Obs_covs_l2, coords = Coords, range.ind = Biogeo_clip_mat) 
+msAbu_l <- list(y = Abund_array, abu.covs = Site_covs4, det.covs = Obs_covs_l2, coords = Coords, range.ind = Biogeo_clip_mat) 
 
 # Convert abundance to occupancy
 msOcc_l <- msAbu_l
@@ -709,9 +713,10 @@ stop()
 saveRDS(msOcc_l, "Rdata/msOcc_l_all_sites_555.rds")
 
 # EXTRAS ------------------------------------------------------------------
-
 # >Checks -----------------------------------------------------------------
 dim(msOcc_l$y)
+msOcc_l$occ.covs %>% Na_rows_cols()
+msOcc_l$occ.covs$Habitat
 
 # Detection covariates should have NAs in the same locations
 Obs_na_l <- map(Obs_covs_l, \(df){
@@ -756,8 +761,8 @@ obs_sites <- apply(msOcc_l$y, c(1,2), max, na.rm = TRUE) %>%
 
 # NEED FT_abu
 
-Birds_mat <- Meta_birds %>% arrange(Id_muestreo) %>% 
-  column_to_rownames("Id_muestreo") %>% 
+Birds_mat <- Meta_birds %>% arrange(Id_survey) %>% 
+  column_to_rownames("Id_survey") %>% 
   filter(rowSums(.) != 0) %>%
   as.matrix()
 

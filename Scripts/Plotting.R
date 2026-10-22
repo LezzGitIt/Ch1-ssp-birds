@@ -2,8 +2,8 @@
 # Point-count sampling map zoomed to the Meta department (the sole study region for this
 # chapter), on an elevation background - adapted from the full multi-ecoregion version in
 # ../Ssp-bird-data-wrangling/Data_paper/Scripts/Data_paper_ecology_figs.R. That script (and this
-# one's previous version) filtered to Ecoregion == "Piedemonte" rather than Departamento ==
-# "Meta" - in this dataset the two happen to select the exact same 356 rows, but Departamento is
+# one's previous version) filtered to Ecoregion == "Piedemonte" rather than Department ==
+# "Meta" - in this dataset the two happen to select the exact same 356 rows, but Department is
 # the semantically correct field for a map that's explicitly about Meta, so this version filters
 # on that instead. This repo has no Data/ folder of its own yet, so point/spatial layers are read
 # directly from the sibling Ssp-bird-data-wrangling repo.
@@ -34,7 +34,7 @@ mround <- function(x, base) base * round(x / base)
 # Load data -------------------------------------------------------------------
 wrangling_repo <- "../Ssp-bird-data-wrangling"
 load(file.path(wrangling_repo, "Rdata/NE_layers_Colombia.Rdata")) # rivers_co, neCol, neColDepts, SA
-Pc_locs_dc_sf <- st_read(file.path(wrangling_repo, "Derived_geospatial/shp/Pc_locs_dc.gpkg"), quiet = TRUE)
+Pc_locs_dc_sf <- st_read(file.path(wrangling_repo, "Derived/Geospatial/shp/Pc_locs_dc.gpkg"), quiet = TRUE)
 
 # Elevation background --------------------------------------------------------
 # elevation_30s() reads from the shared cache below if already downloaded (it is, here) rather
@@ -63,7 +63,7 @@ Col_alt_map_log <- Col_alt_base + scale_fill_viridis_c(trans = "log")
 # overlapping point counts per cell, then jitter proportionally to how many share a cell so nearby
 # but distinct sites don't render as one dot.
 Pc_locs_meta <- Pc_locs_dc_sf %>%
-  filter(Departamento == "Meta", Uniq_db != "Cipav mbd") %>%
+  filter(Department == "Meta", Uniq_db != "Cipav mbd") %>%
   st_drop_geometry() %>%
   tibble() %>%
   mutate(Latitud_rd = mround(Latitud, .015), Longitud_rd = mround(Longitud, .015)) %>%
