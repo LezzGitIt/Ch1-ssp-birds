@@ -29,13 +29,13 @@ Excels <- "Derived/Excels/"
 ## NOTE: Removing Hatico points until can digitize
 Hatico_pc_nums <- str_pad(1:12, width = 2, pad = 0)
 
-## INTERIM: landscape metrics (Dist_forest, ssp, te) are no longer in the wrangling repo's Event_covs, so read them from its frozen export until Extract_lcs.R / LSM.R move into this repo
-Lsm_interim <- read_lsm_interim(Wrangling_repo)
+## Landscape metrics (Dist_forest, ssp, te) are built in this repo by 00a_Extract_lcs.R and 00b_LSM.R
+Lsm <- read_lsm()
 
 Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv"))
 Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>%
   filter(!Id_survey_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>%
-  left_join(Lsm_interim, by = c("Id_survey", "Year")) %>%
+  left_join(Lsm, by = c("Id_survey", "Year")) %>%
   # INTERIM: Id_group_no_dc (farm x research question) was dropped upstream; rebuild it by removing the collector prefix from Id_group (e.g. "G-MB-M-A" -> "MB-M-A") until the farm and location random intercepts replace it
   mutate(Id_group_no_dc = str_remove(Id_group, "^[^-]+-"))
 

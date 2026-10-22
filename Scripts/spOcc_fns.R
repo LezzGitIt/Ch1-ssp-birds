@@ -128,8 +128,8 @@ label_params <- function(param, term_labels){
   })
 }
 
-# INTERIM: landscape metrics (Dist_forest, ssp, te) per point and year, read from the wrangling repo's frozen 2026-05-03 export (Spanish headers renamed to English), until Extract_lcs.R / LSM.R move into this repo and regenerate them
-read_lsm_interim <- function(wrangling_repo){
-  readr::read_csv(paste0(wrangling_repo, "Derived/Excels/Event_covs_lsm2.csv"), show_col_types = FALSE) %>%
-    dplyr::distinct(Id_survey = Id_muestreo, Year = Ano, Dist_forest, ssp, te)
+# Landscape metrics (Dist_forest, ssp, te) per point and year, written by 00b_LSM.R
+read_lsm <- function(lsm_path = "Derived/Excels/Event_covs_lsm.csv"){
+  readr::read_csv(lsm_path, show_col_types = FALSE) %>%
+    dplyr::distinct(Id_survey, Year, Dist_forest, ssp, te)
 }

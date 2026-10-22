@@ -17,6 +17,23 @@ The goal is to provide actionable insights for biodiversity conservation in the 
 - **Data**: 500+ point count sites collected over a decade.
 - **Analysis**: Bayesian multi-species occupancy / abundance models, alpha and beta diversity, community composition, functional diversity metrics
 
+## Pipeline
+
+Run from the repository root (open `Ch1-ssp-birds.Rproj`). Survey tables, point locations and site covariates are read from the sibling repository `../Ssp-bird-data-wrangling/`; scripts stop with a deliberate `stop()` before optional or export sections.
+
+| Script | Purpose |
+|----|----|
+| `Scripts/00a_Extract_lcs.R` | Processes the digitized land-cover polygons for each period (middle, past, ubc) into snapped land-cover layers around each point count |
+| `Scripts/00b_LSM.R` | Landscape metrics (e.g. `Dist_forest`, `ssp`, `te`) per period, then joins them to the survey table → `Derived/Excels/Event_covs_lsm.csv` |
+| `Scripts/01_Wrangling_ms.R` | Builds the multi-species `spOccupancy` data list |
+| `Scripts/Correlation_vis.R` | Screens candidate predictors for collinearity |
+| `Scripts/spOccupancy_ms.R` | Fits the multi-species occupancy models and runs diagnostics |
+| `Scripts/postHoc_ft.R`, `Scripts/NMDS.R`, `Scripts/Marginal_effects.R`, `Scripts/Plotting.R` | Trait analysis, community composition, marginal effects and the sampling map |
+| `Scripts/spOcc_fns.R` | Shared functions, sourced by the scripts above |
+| `Scripts/DAGs.R`, `Scripts/qmd/Math.qmd` | Causal diagrams and model notation |
+
+`Scripts/_archive/` holds superseded scripts kept for reference. `Data/`, `Derived/`, `Figures/` and `Extra_scripts/` are local and not tracked.
+
 ## Usage
 
 If you are interested in collaborating on this project please send me an email at skinnerayayron93 [at] gmail [dot] com. The data is not available publicly at present. For the time being the code can only be observed visually, although similar analyses could be performed using publicly available biodiversity data (e.g., from the vegan package). 
