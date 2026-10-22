@@ -40,7 +40,7 @@ if(Forest){
 # Join site covs with landscapemetrics. First, match Site_covs_df with 'middle' shapefile, & then overwrite the middle file using the past & ubc files in the correct locations. 
 # NOTE:: The 'lc_file' column specifies where the lc information comes from
 Site_covs2 <- Event_covs %>% 
-  select(Id_muestreo_no_dc, Id_muestreo, Ano, Dist_forest, ssp, te, Canopy_cover, Canopy_height_m) %>% 
+  distinct(Id_muestreo_no_dc, Id_muestreo, Ano, Dist_forest, ssp, te, Canopy_cover, Canopy_height_m) %>% 
   right_join(Site_covs) 
 
 # Calculate correlations --------------------------------------------------
@@ -70,7 +70,9 @@ Event_covs %>%
 
 # Visualize ---------------------------------------------------------------
 # Occupancy covs
-GGally::ggcorr(Site_covs2, label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
+Site_covs2 %>% mutate(across(where(is.numeric), scale)) %>%
+  select(Tot_prec, ssp, Canopy_cover, Ano) %>% # Dist_forest
+  GGally::ggcorr(label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
 
 # Plot correlation between categorical Habitat and continuous predictor variables in causal model 
 plot_cat_cor <- function(df, cat_x, y_var, y_title) {
