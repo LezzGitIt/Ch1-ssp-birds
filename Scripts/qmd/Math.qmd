@@ -1,0 +1,111 @@
+---
+title: "Test pad for math formulas"
+editor: visual
+---
+
+# Single species
+
+The joint likelihood for parameters $\psi_i$ and $p_i$ is defined by these conditional formulas dependent on the detection history at site $i$
+
+$$
+\Pr(y_i \mid \psi_i, p_i) =
+\begin{cases}
+\psi_i \cdot \text{Binomial}(y_i \mid K, p_i), & \text{if } y_i > 0, \\\\
+\psi_i \cdot \text{Binomial}(0 \mid K, p_i) + (1 - \psi_i), & \text{if } y_i = 0
+\end{cases}
+$$
+
+where\
+$\psi_i$ = probability that site $i$ is occupied\
+$p_i$ = probability of detection on a survey, given occupancy\
+$y_i$ = number of detections at site $i$ in $K$ surveys\
+$K$ = total number of surveys per site
+
+For example, consider the detection history $y = 1$ out of $K = 5$ surveys. If the sampler proposes \$\\psi = 0.8\$ and \$p = 0.8\$, the likelihood contribution for this site is:
+
+So for example, lets say we have the following detection history: `1, 0, 0, 0, 0`, such that $y = 1$ out of $K = 5$ urveys. In the exploration of the parameter space, if the sampler proposes $\psi$ = 0.8 and $p$ = 0.8, then the likelihood contribution for this site is (pulling from the top formula, given that $y_i > 0$):
+
+```{r}
+#| label: one-detection
+
+0.8 * dbinom(1, 5, .8)
+```
+
+The log likelihood of this combination of parameters is not very high for this site given the data we observed there. On the other hand, when no detections are observed at site $i$ ($y_i = 0$), the likelihood is a sum over two mutually exclusive possibilities:
+
+$$
+\Pr(y_i = 0 \mid \psi_i, p_i) \;=\;
+\psi_i \cdot \Pr(0 \mid K, p_i) + (1 - \psi_i).
+$$
+
+The first term is the probability that the species is present but undetected across $K$ surveys, and the second term (after the $+$) is the probability that the species is truly absent. Note in this case we don't observe the *latent occupancy state*, so we marginalize it out.
+
+This calculation is repeated for every site, with contributions accumulated into the joint log-likelihood, then combined with the priors to return the log posterior density for those parameter values:
+
+$$
+\log L(\psi, p \mid \{y_i\}_{i=1}^{n_{\text{sites}}}) \;=\;
+\sum_{i=1}^{n_{\text{sites}}} \log \Pr(y_i \mid \psi, p)
+$$
+
+-   $\psi$ = vector of site-level occupancy probabilities ($\psi_1, \psi_2, \dots, \psi_{n_{\text{sites}}}$)\
+-   $p$ = vector of site-level detection probabilities ($p_1, p_2, \dots, p_{n_{\text{sites}}}$)\
+-   $\{y_i\}_{i=1}^{n_{\text{sites}}}$ = set of detection outcomes across all sites\
+-   $n_{\text{sites}}$ = number of sites in the study
+
+After evaluating the full joint log-posterior (as just described), the NUTS sampler uses an accept/reject step to ensure sampling from the correct distribution.
+
+# Multi-species
+
+We model latent occurence $z$ for species $i$ at site $j$, we model the ecological process of interest
+
+$$
+\begin{aligned}z_{ij} &\sim \text{Bernoulli}(\psi_{ij}) \end{aligned}
+$$
+
+where $\psi$ is the occupancy probability. The data-generating process is then
+
+$$
+\begin{aligned}y_{ijk} \mid z_{ij} &\sim \text{Bernoulli}(z_{ij} * p_{ijk}) \end{aligned}
+$$
+
+where $y_{ijk}$ is the detection non-detection data across $k$ replicates, and $p$ is the probability of detection. The marginal likelihood for one species by site combination is then
+
+$$
+\Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij}) =\begin{cases}\displaystyle\psi_{ij} \prod_{k=1}^K p_{ijk}^{y_{ijk}} (1-p_{ijk})^{1-y_{ijk}},& \text{if } y_{ij} > 0, \\[10pt]\displaystyle\psi_{ij}\prod_{k=1}^K (1-p_{ijk}) + (1-\psi_{ij}),& \text{if } y_{ij} = 0 \end{cases}
+$$
+
+where $y_{ij}$ is the total number of detections across replicate surveys, such that $y_{ij} = \sum_{k=1}^K y_{ijk}$.
+
+$$
+y_{ij} = \sum_{k=1}^K y_{ijk}
+$$
+
+The joint log-likelihood across species and sites is then
+
+$$
+\log L(\theta \mid \mathbf y)=\sum_{i=1}^I \sum_{j=1}^J\log \Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij})
+$$
+
+where $\theta=\{\beta_{0,i},\boldsymbol{\beta}_i,\alpha_{0,i},\boldsymbol{\alpha}_i\}_{i=1}^I$. The full joint posterior is then
+
+$$
+\log p(\theta \mid \mathbf y)=\sum_{i=1}^I \sum_{j=1}^J\log \Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij})+ \log p(\theta)
+$$
+
+We can model $\psi_{ij}$ as a function of covariates where $\beta_{0,i}$ is the species-specific intercept, $X_j$ are site-specific covariates and $\beta_i$ are the species-specific slopes that determine occupancy $\psi_{ij}$ for species $i$ at site $j$. Similarly, we model $p_{ijk}$ as a function of the species-specific intercepts $\alpha_{0,i}$, $V_{jk}$ are site and replicate specific covariates and $\alpha_i$ are species-specific slopes
+
+$$
+\begin{aligned}\text{logit}(\psi_{ij}) &= \beta_{0,i} + \mathbf X_j^\top \boldsymbol{\beta}_i, \\\text{logit}(p_{ijk}) &= \alpha_{0,i} + \mathbf V_{jk}^\top \boldsymbol{\alpha}_i \end{aligned}
+$$
+
+Species-specific intercepts drawn from community-level normal distributions characterized by means $\mu$ and variances $\sigma^2$ for the occupancy and detection processes, respectively.
+
+$$
+\begin{aligned}\beta_{0,i} &\sim \mathcal N(\mu_{\beta_0}, \sigma_{\beta_0}^2), \\\alpha_{0,i} &\sim \mathcal N(\mu_{\alpha_0}, \sigma_{\alpha_0}^2)\end{aligned}
+$$
+
+Species-specific slope vectors were drawn from multivariate normal community distributions with mean vectors $\mu$ and covariance matrices $\Sigma$
+
+$$
+\begin{aligned}\boldsymbol{\beta}_i \sim \mathcal N(\boldsymbol{\mu}_{\beta}, \Sigma_{\beta}),\\ \qquad\boldsymbol{\alpha}_i \sim \mathcal N(\boldsymbol{\mu}_{\alpha}, \Sigma_{\alpha})\end{aligned}
+$$
