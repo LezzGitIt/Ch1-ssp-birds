@@ -14,6 +14,7 @@
 # Load libraries & data ---------------------------------------------------
 library(tidyverse)
 library(readxl)
+library(sf)
 library(unmarked)
 library(spAbundance)
 library(spOccupancy)
@@ -23,6 +24,7 @@ library(brms)
 library(AICcmodavg)
 library(furrr) # Use furrr::future_map()
 library(coda)
+library(broom.mixed)
 library(tictoc)
 library(ggpubr)
 library(cowplot)
@@ -31,12 +33,10 @@ ggplot2::theme_set(theme_cowplot())
 conflicts_prefer(dplyr::select)
 conflicts_prefer(dplyr::filter)
 
-load("Rdata/the_basics_05.10.25.Rdata")
-load("Rdata/Taxonomy_11.14.24.Rdata")
-load("Rdata/Occ_abu_inputs_05.16.25.Rdata")
-load("Rdata/Occ_abu_models_01.09.25.Rdata")
+load("Rdata/Occ_abu_inputs_01.19.26.Rdata")
+#load("Rdata/Occ_abu_models_01.19.25.Rdata")
 
-source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Grad_School/Rcookbook/Themes_funs.R")
+source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Academia/Rcookbook/Themes_funs.R")
 
 #NOTE:: The unique row identifier  [e.g. ID x Year] is critical , this defines what a row is in your dataframes and how many rows each dataframe will have 
 Row_identifier <- c("Id_muestreo", "Ano_grp")
@@ -125,7 +125,7 @@ safe_pcount <- safely(
 )
 # Track time
 start_time <- Sys.time()
-fit_ml_safe <- map(umf_abu_l, safe_pcount, .progress = TRUE) #future_map
+fit_ml_safe <- map(umf_abu_l[1:2], safe_pcount, .progress = TRUE) #future_map
 run_time <- Sys.time() - start_time
 units_rt <- units(run_time) # Units run time
 run_time <- round(as.numeric(run_time), 1)
@@ -543,7 +543,7 @@ modSel() # LOO cross-validation
 cbind(unmarked=coef(mod_ml), stan=coef(mod_b))
 
 
-# Vignette ----------------------------------------------------------------
+# >Vignette -------------------------------------------------------------
 library(MuMIn) 
 ##single season
 data(mallard)
@@ -581,20 +581,254 @@ mallardUMF <- unmarkedFrameOccu(mallard.y, siteCovs = mallard.site,
 (d2 <- dredge(ufm.mallard.global, rank = AIC,subset=`p(date)`&`p(I(date^2))`))
 
 
-# >spOccupancy ------------------------------------------------------------
-# PROBLEMS: 
-# 1) Not working because every site is not unique (gaica ubc vs gaica mbd). Would need to go back in and change subsetting process 
-# 2) Does not allow NAs in occurrence (site) covs, so would also need to subset out all GAICA distancia data if we want to keep habitat as a covariate 
+# spOccupancy ------------------------------------------------------------
+# NOTES:
+# 1) Requires unique spatial coordinates, so I added a small jitter (.001)
+# 2) Does not allow NAs in occurrence (site) covs
     
-spOcc_mod <- map(spOcc_ll, \(spOcc){
-  PGOcc(
-    occ.formula = ~ Elev + Tot.prec + Habitat_cons + Ano1 + (1 | Id_group_fac),
-    det.formula = ~ j_day + Pc_start,
+# Non-spatial model
+safe_PGOcc <- safely(PGOcc)
+Occ_mod_l_safe <- map(spOcc_ll, \(spOcc){
+  if(length(unique(spOcc$occ.covs$Ecoregion)) > 1){
+    occ.formula <- as.formula("~ Ecoregion + Elev + Tot_prec + te + ssp + Habitat + Ano1 + (1 | Id_group_num)") 
+  } else{
+    occ.formula <- as.formula("~ Elev + Tot_prec + te + ssp + Habitat + Ano1 + (1 | Id_group_num)")
+  }
+  
+  # Detection formula conditional on number of data collectors 
+  if(length(unique(spOcc$det.covs$Nombre_institucion)) > 1){
+    det.formula <- as.formula("~ Nombre_institucion + Julian_day + Pc_start + Sampling_day")
+  } else{
+    det.formula <- as.formula("~ Julian_day + Pc_start + Sampling_day")
+  }
+  
+  safe_PGOcc(
+    occ.formula = occ.formula,
+    det.formula = det.formula,
     data = spOcc[1:3], n.burn = 2000, n.samples = 4000,
-    n.thin = 4, n.chains = 3, verbose = FALSE, k.fold = 2
+    n.thin = 1, n.chains = 3, verbose = TRUE
+    #k.fold = 2
   )
 }, .progress = TRUE)
-summary(spOcc_mod[[5]])
+
+# Extract the successful mod runs
+Occ_mod_l <- map(Occ_mod_l_safe, "result")
+Occ_mod_l <- discard(Occ_mod_l, is.null) 
+
+# Inspect errors
+fit_errors <- map(Occ_mod_l_safe, "error")
+discard(fit_errors, is.null) 
+
+extract_parms <- function(model_list, spatial = FALSE){
+  map(model_list, \(mod){
+    
+    beta <- tidyMCMC(mod$beta.samples) %>% mutate(parameter = "Beta")
+    alpha <- tidyMCMC(mod$alpha.samples) %>% mutate(parameter = "Alpha")
+    
+    theta <- NULL
+    if(spatial && !is.null(mod$theta.samples)){
+      theta <- tidyMCMC(mod$theta.samples) %>% mutate(parameter = "Theta")
+    }
+    
+    pars <- bind_rows(beta, alpha, theta)
+    
+    diag_tbl <- tibble(
+      ess = c(mod$ESS$beta, mod$ESS$alpha, if(spatial) mod$ESS$theta else NULL),
+      rhat = c(mod$rhat$beta, mod$rhat$alpha, if(spatial) mod$rhat$theta else NULL)
+    )
+    
+    bind_cols(pars, diag_tbl)
+  }) %>% list_rbind(names_to = "species_ayerbe") %>%
+    relocate(parameter, .after = species_ayerbe)
+}
+
+extract_parms(Occ_mod_l, spatial = FALSE)
+
+
+## Spatial model
+## Priors on spatial decay parameter (phi)
+dist_mat <- st_distance(Pc_locs_sf)
+# By default the priors on phi are uniform(3 / max(dist_mat), 3 / min(dist_mat)), which is problematic as the upper boundary is undefined (division by 0). 
+# Default priors
+3 / max(dist_mat) # lower boundary
+3 / .001 # upper boundary
+as.numeric(lower)
+
+# Improved priors
+lower <- 3 / 175e3 # largest distance between points within an ecoregion is 175 km
+upper <- 3 / .1 # points are clustered, so replace min(dist_mat) with 'transect' length (500 m)
+eff_spatial_range <- c(3 / upper, 3 / lower)
+eff_spatial_range / 1000 # Translate above priors to the possible effective spatial ranges you are allowing (in km)
+
+priors <- list(beta.normal = list(mean = 0, var = 2.72), 
+               alpha.normal = list(mean = 0, var = 2.72), 
+               sigma.sq.ig = c(2, 1), #c(.25, 2)
+               phi.unif = c(lower, upper))
+
+# error in base::stop("contrasts can be applied only to factors with 2 or more levels")
+unique(spOcc_ll[[19]]$det.covs$Nombre_institucion)
+
+# Create safe model fitting function to capture errors 
+safe_spPGOcc <- safely(spPGOcc)
+
+spOcc_mod_l_safe_int <- imap(spOcc_ll, \(spOcc, spp_name){
+  print(spp_name)
+  
+  # Occupancy formula conditional on number of ecoregions present
+  if(FALSE){
+    if(length(unique(spOcc$occ.covs$Ecoregion)) > 1){
+      occ.formula <- as.formula("~Elev + Tot_prec + te + ssp + Habitat + Ano1") # Ecoregion + + (1 | Id_group_num)
+    } else{
+      occ.formula <- as.formula("~ Elev + Tot_prec + te + ssp + Habitat + Ano1 + (1 | Id_group_num)")
+    }
+    
+    # Detection formula conditional on number of data collectors 
+    if(length(unique(spOcc$det.covs$Nombre_institucion)) > 1){
+      det.formula <- as.formula("~ Nombre_institucion + Julian_day + Pc_start")
+    } else{
+      det.formula <- as.formula("~ Julian_day + Pc_start")
+    }
+  }
+  
+  safe_spPGOcc(
+    occ.formula = ~1, 
+    det.formula = ~1,
+    priors = priors,
+    cov.model = "exponential", NNGP = TRUE, n.neighbors = 15,
+    data = spOcc[1:4], n.burn = 2000, n.batch = 400, batch.length = 25,
+    n.thin = 2, n.chains = 3, n.report = 100, verbose = TRUE,
+    tuning = list(phi = 0.5)
+  )
+}, .progress = TRUE)
+
+spOcc_mod_l_int <- map(spOcc_mod_l_safe_int, "result")
+spOcc_mod_l_int 
+fit_errors <- map(spOcc_mod_l_int, "error")
+discard(fit_errors, is.null) 
+
+# Traceplots
+imap(spOcc_mod_l_int, \(mod, name){
+  plot(mod, param = "theta")
+})
+
+# Extract parameter estimates and estimates of gof (ESS, rhat)
+parms_df <- map(spOcc_mod_l_int, \(mod){
+  beta <- tidyMCMC(mod$beta.samples) %>% 
+    mutate(parameter = "Beta")
+  alpha <- tidyMCMC(mod$alpha.samples) %>% 
+    mutate(parameter = "Alpha")
+  theta <- tidyMCMC(mod$theta.samples) %>% 
+    mutate(parameter = "Theta")
+  diagnostics <- tibble(
+    ess = c(mod$ESS$beta, mod$ESS$alpha, mod$ESS$theta),
+    rhat = c(mod$rhat$beta, mod$rhat$alpha, mod$rhat$theta)
+  )
+  bind_rows(beta, alpha, theta) %>% bind_cols(diagnostics)
+}) %>% list_rbind(names_to = "species_ayerbe") %>% 
+  relocate(parameter, .after = species_ayerbe)
+
+## Examine rhat and ess values for all parameters
+# Bivariate plot with rhat and ess 
+parms_df %>% #filter(rhat < 2) %>% 
+  ggplot(aes(x = ess, y = rhat, color = term, shape = parameter)) +
+  geom_point() + 
+  geom_hline(yintercept = 1.1) + 
+  geom_vline(xintercept = 100) + 
+  guides(color = "none")
+
+# rhat & ess are related
+summary(lme4::lmer(ess ~ rhat + (1 | species_ayerbe), data = parms_df))
+  
+# Visualize by species
+hline_tbl <- tibble(name = c("rhat", "ess"), yintercept = c(100, 1.1))
+parms_df %>% filter(rhat < 2) %>%
+  #filter(parameter == "Theta" & ess > 100 & rhat < 1.1) %>%
+  pivot_longer(cols = c(ess, rhat), names_to = "diagnostic") %>%
+  ggplot(aes(x = species_ayerbe, y = value, color = term, shape = parameter)) +
+  geom_point(position = "jitter") + 
+  facet_wrap(~diagnostic, scales = "free_y") +
+  #geom_hline(data = hline_tbl, 
+   #          aes(yintercept = yintercept), 
+    #         linetype = "dashed") + 
+  guides(color = "none") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+## NEED TO PLOT SPATIAL AUTOCORRELATION MAPS?
+
+# Function taking posterior predictive check object and calculating bayesian p-value
+calc_bayes_p <- function(ppc_obj){
+  fit_stat <- ppc_obj$fit.stat
+  group <- ifelse(ppc_obj$group == 1, "Site", "Replicate")
+  
+  tot.post <- ppc_obj$n.chains * ppc_obj$n.post
+  bayes_p <- sum(ppc_obj$fit.y.rep > ppc_obj$fit.y) / tot.post
+  bayes_p <- round(bayes_p, 3)
+  tibble(fit_stat, group, bayes_p)
+}
+
+# Posterior predictive check (ppc) by site and by replicate
+ppc_ll2 <- map(spOcc_mod_l_int, \(mod){
+  # Run 4 gof tests 
+  ppc_sites_ft <- ppcOcc(mod, fit.stat = "freeman-tukey", group = 1)
+  ppc_reps_ft <- ppcOcc(mod, fit.stat = "freeman-tukey", group = 2)
+  ppc_sites_x2 <- ppcOcc(mod, fit.stat = "chi-squared", group = 1)
+  ppc_reps_x2 <- ppcOcc(mod, fit.stat = "chi-squared", group = 2)
+  
+  # Extract bayesian p-value 
+  ppc_l <- list(
+    ppc_sites_ft,
+    ppc_reps_ft,
+    ppc_sites_x2,
+    ppc_reps_x2
+    )
+}, .progress = TRUE) 
+
+# Apply custom function and bind into tibble
+gof_tbl2 <- imap(ppc_ll2, ~ map(.x, calc_bayes_p) %>% 
+       bind_rows() %>% 
+       mutate(species_ayerbe = .y)) %>% 
+  bind_rows()
+
+# Plot GOF tests
+gof_tbl2 %>% 
+  ggplot(aes(species_ayerbe, bayes_p, shape = group)) + 
+  geom_boxplot(position = position_dodge(width = 0.7)) +
+  geom_point(aes(color = fit_stat),
+             position = position_dodge(width = 0.7)) +
+  geom_hline(yintercept = c(0.5, 0.1), linetype = "dashed", 
+             color = c("black", "red")) +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1),
+        legend.position = "top")
+
+## Examine parameter estimates
+parms_df %>% 
+  filter(parameter %in% c("Theta")) %>% #c("Alpha", "Beta")
+  filter(ess > 100 & rhat < 1.1) %>%
+ # filter(term == "HabitatMosaic") %>% 
+  mutate(UCL = estimate + (1.96 * std.error), 
+         LCL = estimate - (1.96 * std.error)) %>%
+  ggplot(aes(x = species_ayerbe, y = estimate)) +
+  geom_point() + 
+  geom_errorbar(aes(ymin = LCL, ymax = UCL)) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  theme(axis.text.x = element_text(angle = 60, hjust = 1))
+
+
+
+# Plot ppc
+ppc.df <- data.frame(fit = ppc_sites$fit.y,
+                     fit.rep = ppc_sites$fit.y.rep,
+                     color = 'lightskyblue1')
+ppc.df$color[ppc.df$fit.rep > ppc.df$fit] <- 'lightsalmon'
+plot(ppc.df$fit, ppc.df$fit.rep, bg = ppc.df$color, 
+     pch = 21, ylab = 'Fit', xlab = 'True')
+lines(ppc.df$fit, ppc.df$fit, col = 'black')
+
+diff.fit <- ppc_sites$fit.y.rep.group.quants[3, ] - ppc_sites$fit.y.group.quants[3, ]
+plot(diff.fit, pch = 19, xlab = 'Site ID', ylab = 'Replicate - True Discrepancy')
+
+names(spOcc_mod[[1]])
+summary(spOcc_mod[[3]])
 map(spOcc_mod, summary)
 
 # Multi-season models
@@ -610,11 +844,6 @@ map(spOcc_mod, summary)
 # 5) integrated: We have different data collectors with different abilities to detect birds by sight & (especially) by ear
 
 # NOTE there are several other relevant arguments if we add coords back into the mix (see below)
-
-spOcc_ll$Amazona_ochrocephala$occ.covs %>% filter(is.na(Habitat_cons)) %>% 
-  pull(Id_group)
-
-tabyl(spOcc_ll$Amazona_ochrocephala$occ.covs$Habitat_cons)
 
 # >spAbundance ------------------------------------------------------------
 # Doser suggests that including spatial autocorrelation & negative-binomial distribution will help with zero-inflation
@@ -641,8 +870,6 @@ True_abu <- rpois(N, lambda)
 
 # Detectability
 time <- rnorm(N, 0, 1)
-
-
 
 data.frame(Tree_cov = Tree_cov, lambda = lambda, N = N) %>% 
   arrange(lambda)
@@ -968,16 +1195,29 @@ lapply(btbwHBEF[c(1, 2, 4)], head)
 btbw.occ.formula <- ~ scale(Elevation) + I(scale(Elevation)^2)
 btbw.det.formula <- ~ scale(day) + scale(tod) + I(scale(day)^2)
 
+# Priors for spatial parameters
+dist.hbef <- dist(ovenHBEF$coords)
+min.dist <- min(dist.hbef)
+max.dist <- max(dist.hbef)
+c(min.dist, max.dist) # 100 meters - 7.7 km 
+oven.priors <- list(beta.normal = list(mean = 0, var = 2.72), 
+                    alpha.normal = list(mean = 0, var = 2.72), 
+                    sigma.sq.ig = c(2, 1), 
+                    phi.unif = c(3/max.dist, 3/min.dist))
+
 # Run the model
 out <- spPGOcc(
   occ.formula = btbw.occ.formula,
   det.formula = btbw.det.formula,
+  priors = oven.priors,
   data = btbwHBEF, n.batch = 400, batch.length = 25,
   accept.rate = 0.43, cov.model = "exponential",
   NNGP = TRUE, n.neighbors = 5, n.burn = 2000,
-  n.thin = 4, n.chains = 3, verbose = FALSE, k.fold = 2
+  n.thin = 4, n.chains = 3, verbose = TRUE, #k.fold = 2
 )
 summary(out)
+tidyMCMC(out$theta.samples)
+3 / .007
 
 ppc.out <- ppcOcc(out, fit.stat = "freeman-tukey", group = 1)
 summary(ppc.out)
