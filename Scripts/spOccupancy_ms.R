@@ -194,11 +194,21 @@ if(Forest){ # Forest_typ
 }
 
 ## Priors on spatial decay parameter (phi)
-dist_mat <- st_distance(Pc_locs_dc_sf)
+Pc_locs_dc_sf2 <- Pc_locs_dc_sf %>% filter(
+  Ecoregion == "Piedemonte" & !Uniq_db %in% c("Cipav mbd", "Gaica distancia")
+  )
+dist_mat <- st_distance(Pc_locs_dc_sf2)
+
+# Plot spatially
+Pc_locs_dc_sf2 %>% st_jitter(amount = .02) %>%
+  ggplot(aes(color = Uniq_db), alpha = .3) + 
+  geom_sf()
+
 # By default the priors on phi are uniform(3 / max(dist_mat), 3 / min(dist_mat)), which is problematic as the upper boundary is undefined (division by 0). 
 # Default priors
 3 / max(dist_mat) # lower boundary
 3 / min(dist_mat) # upper boundary
+quantile(dist_mat, 0.4) 
 
 # Improved priors
 lower <- 3 / 25e3 # largest distance between points within an ecoregion is 175 km
@@ -531,6 +541,12 @@ draws_beta %>%
   plot_half_eye(y_var = param) #+ 
   #labs(title = "100 species")
 plogis(.3)
+
+# Examine percent of posterior that is positive, for each community-level occupancy parameter
+draws_beta %>%
+  filter(!str_detect(param, "^\\.")) %>% # rm .iteration, .draw, and .chain
+  summarize(P_positive = mean(value > 0), .by = param)
+
 draws_alpha %>% 
   #filter(!str_detect(param, "institucion|Intercept")) %>%
   plot_half_eye(y_var = param) #+ 
