@@ -118,3 +118,12 @@ plot_parm_estimates <- function(parms_df, ms = FALSE){
     theme(axis.text.x = element_text(angle = 60, hjust = 1), 
           legend.position = "top") 
 }
+
+# Translate spOccupancy coefficient names (e.g. "HabitatSsp:Dist_forest") into readable labels, looking up each part of an interaction in a named vector of term labels; parts missing from the lookup keep their model name
+label_params <- function(param, term_labels){
+  purrr::map_chr(param, \(name){
+    terms <- stringr::str_split_1(name, ":")
+    labels <- dplyr::coalesce(unname(term_labels[terms]), terms)
+    paste(labels, collapse = " × ")
+  })
+}

@@ -505,6 +505,25 @@ plot_half_eye <- function(df, y_var){
     guides(fill = "none")
 }
 
+# Translate names back to English
+## Keyed by model term, so the labels follow whichever formula the loaded model used; interaction terms are labelled part by part, and terms not listed keep their model name
+Term_labels <- c(
+  "(Intercept)" = "Intercept",
+  HabitatPastizales = "Pasture", HabitatBosque = "Forest", "HabitatBosque ripario" = "Riparian forest", HabitatSsp = "Silvopasture", HabitatMosaic = "Mosaic",
+  "HabitatSsp-Arboles dispersos" = "Dispersed trees", "HabitatSsp-Setos" = "Live fence", "HabitatSsp-Setos forrajeros" = "Fodder hedges",
+  Tot_prec = "Precipitation", ssp = "Silvopasture (300 m)", Canopy_cover = "Forest (1 km)", Dist_forest = "Distance to forest", Ano1 = "Year", Elev = "Elevation", te = "Total edge"
+)
+
+# Plot - occupancy (translated names)
+draws_beta %>%
+  mutate(Param_new = label_params(param, Term_labels)) %>%
+  mutate(Param_new = as.factor(Param_new),
+         Param_new = fct_relevel(Param_new, c("Forest", "Riparian forest", "Dispersed trees", "Live fence", "Pasture"))) %>%
+  filter(Param_new %in% c("Pasture", "Dispersed trees", "Forest")) %>%
+  filter(!str_detect(param, "Ecoregion|Intercept")) %>% 
+  plot_half_eye(y_var = Param_new) #+ 
+  #labs(title = "100 species")
+
 # Understand what is contained in (Intercept)
 draws_beta %>% 
   #filter(str_detect(param, "Habitat")) %>%
@@ -606,25 +625,32 @@ create.re.tbl <- function(re.samples){
   tibble(Group, Id, Species, Intercept)
 }
 
+# Global detection intercept (community mean) and the SD of the collector-team random effect, computed from the loaded model so they match its summary(Occ_mod); sigma.sq.p is a variance, so take its square root
+Global_mean <- mean(Occ_mod$alpha.comm.samples[, "(Intercept)"])
+Global_sd <- sqrt(mean(Occ_mod$sigma.sq.p.samples[, "Collector_team_num"]))
+Global_mean_sample <- tibble(
+  Collector_team_num = "Global_mean", 
+  Global_mean = Global_mean,
+  Species = NA,
+  Samples = rnorm(100, Global_mean, Global_sd)
+)
+
 ## Detectability random effect - observer team
+# alpha.star.samples is the deviation from the global mean
 Detectability_re <- create.re.tbl(Occ_mod$alpha.star.samples) %>% 
+  mutate(Intercept = Global_mean + Intercept) %>%
   select(-Group) %>% 
   rename(Collector_team_num = Id)
 
-# Global mean & sd from summary(Occ_mod)
-Global_mean <- tibble(
-  Collector_team_num = "Global_mean", 
-  Species = NA,
-  Intercept = rnorm(100, .1458, 0.022)
-)
-
 # Plot
-Detectability_re %>% bind_rows(Global_mean) %>%
+# Collector_team_join
+Detectability_re %>%
   #filter(Collector_team_num %in% c(1,3, 9, 10)) %>%
   ggplot(aes(x = Intercept, color = Collector_team_num)) + 
   geom_density() + 
+  geom_density(data = Global_mean_sample, aes(x = Samples), color = "black") +
   # Global mean
-  geom_vline(xintercept = .1458, linetype = "dashed") +
+  geom_vline(xintercept = Global_mean_sample$Global_mean, linetype = "dashed") +
   labs(title = "All regions - 100 species", x = "Log detectability intercept")
 
 ## Occupancy random effect - Department
