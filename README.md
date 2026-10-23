@@ -19,12 +19,10 @@ The goal is to provide actionable insights for biodiversity conservation in the 
 
 ## Pipeline
 
-Run from the repository root (open `Ch1-ssp-birds.Rproj`). Survey tables, point locations and site covariates are read from the sibling repository `../Ssp-bird-data-wrangling/`; scripts stop with a deliberate `stop()` before optional or export sections.
+Run from the repository root (open `Ch1-ssp-birds.Rproj`). Survey tables, point locations and site covariates are read from the sibling repository `../Ssp-bird-data-wrangling/`, and point-level landscape metrics (`Event_covs_lsm.csv`) from `../Farm_diversity/`, where the land-cover extraction and landscape-metric scripts now live; scripts stop with a deliberate `stop()` before optional or export sections.
 
 | Script | Purpose |
 |----|----|
-| `Scripts/00a_Extract_lcs.R` | Processes the digitized land-cover polygons for each period (middle, past, ubc, el_hatico) into snapped land-cover layers around each point count |
-| `Scripts/00b_LSM.R` | Landscape metrics (e.g. `Dist_forest`, `ssp`, `te`) per period, then joins them to the survey table → `Derived/Excels/Event_covs_lsm.csv` |
 | `Scripts/01_Wrangling_ms.R` | Builds the multi-species `spOccupancy` data list |
 | `Scripts/Correlation_vis.R` | Screens candidate predictors for collinearity |
 | `Scripts/spOccupancy_ms.R` | Fits the multi-species occupancy models and runs diagnostics |

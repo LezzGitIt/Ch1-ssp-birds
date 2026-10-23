@@ -128,8 +128,8 @@ label_params <- function(param, term_labels){
   })
 }
 
-# Landscape metrics (Dist_forest, ssp, te) per point and year, written by 00b_LSM.R
-read_lsm <- function(lsm_path = "Derived/Excels/Event_covs_lsm.csv"){
+# Landscape metrics (Dist_forest, ssp, te) per point and year, written by 00b_LSM.R in the sibling Farm_diversity repo
+read_lsm <- function(lsm_path = "../Farm_diversity/Derived/Excels/Event_covs_lsm.csv"){
   readr::read_csv(lsm_path, show_col_types = FALSE) %>%
     dplyr::distinct(Id_survey, Year, Dist_forest, ssp, te)
 }

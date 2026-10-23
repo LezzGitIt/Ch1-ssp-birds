@@ -29,7 +29,7 @@ Excels <- "Derived/Excels/"
 ## NOTE: Removing Hatico points until can digitize
 Hatico_pc_nums <- str_pad(1:12, width = 2, pad = 0)
 
-## Landscape metrics (Dist_forest, ssp, te) are built in this repo by 00a_Extract_lcs.R and 00b_LSM.R
+## Landscape metrics (Dist_forest, ssp, te) are built in the sibling Farm_diversity repo by 00a_Extract_lcs.R and 00b_LSM.R
 Lsm <- read_lsm()
 
 Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv"))
