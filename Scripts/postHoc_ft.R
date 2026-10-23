@@ -14,7 +14,7 @@ Excels <- "Derived/Excels/"
 Ft <- read_csv(paste0(Wrangling_repo, Excels, "Traits/Functional_traits.csv"))
 
 # Occupancy model output
-Occ_mod <- readRDS("Rdata/Model_output/Occ_mod_99spp_1ecor_ref_2026-05-06.rds")
+Occ_mod <- readRDS("Derived/Model_output/Occ_mod_99spp_1ecor_ref_2026-05-06.rds")
 
 # Forest or non-forest? ---------------------------------------------------
 Forest <- FALSE

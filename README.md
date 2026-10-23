@@ -23,7 +23,7 @@ Run from the repository root (open `Ch1-ssp-birds.Rproj`). Survey tables, point 
 
 | Script | Purpose |
 |----|----|
-| `Scripts/00a_Extract_lcs.R` | Processes the digitized land-cover polygons for each period (middle, past, ubc) into snapped land-cover layers around each point count |
+| `Scripts/00a_Extract_lcs.R` | Processes the digitized land-cover polygons for each period (middle, past, ubc, el_hatico) into snapped land-cover layers around each point count |
 | `Scripts/00b_LSM.R` | Landscape metrics (e.g. `Dist_forest`, `ssp`, `te`) per period, then joins them to the survey table → `Derived/Excels/Event_covs_lsm.csv` |
 | `Scripts/01_Wrangling_ms.R` | Builds the multi-species `spOccupancy` data list |
 | `Scripts/Correlation_vis.R` | Screens candidate predictors for collinearity |

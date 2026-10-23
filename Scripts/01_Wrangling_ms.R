@@ -316,9 +316,9 @@ if(FALSE){ # Slow
     family = "binomial", 
     data = Breed_records[Breed_records$status =="Native",], 
     method = "REML")
-  saveRDS(GAM_region, file = "Rdata/Palacios_GAM_region.rds")
+  saveRDS(GAM_region, file = "Derived/Palacios_GAM_region.rds")
 }
-GAM_region <- readRDS("Rdata/Palacios_GAM_region.rds")
+GAM_region <- readRDS("Derived/Palacios_GAM_region.rds")
 
 # Isolate the unique sites X julian day combinations along with relevant covariates
 Sampled_sites <- Event_covs %>% 
@@ -710,7 +710,7 @@ names(msOcc_l)[2] <- "occ.covs"
 
 # Save object -------------------------------------------------------------
 stop()
-saveRDS(msOcc_l, "Rdata/msOcc_l_all_sites_555.rds")
+saveRDS(msOcc_l, "Derived/msOcc_l_all_sites_555.rds")
 
 # EXTRAS ------------------------------------------------------------------
 # >Checks -----------------------------------------------------------------

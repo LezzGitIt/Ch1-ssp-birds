@@ -19,12 +19,12 @@ conflicts_prefer(dplyr::select)
 conflicts_prefer(dplyr::filter)
 
 ## Data
-#load("Rdata/Occ_abu_inputs_01.28.26.Rdata")
-#load("Rdata/Occ_abu_models_01.19.25.Rdata")
+#load("Derived/Occ_abu_inputs_01.28.26.Rdata")
+#load("Derived/Occ_abu_models_01.19.25.Rdata")
 
 # Create space by removing old models
 rm(list = ls()[!(ls() %in% c())])
-msOcc_l <- readRDS("Rdata/msOcc_l_all_sites_100.rds")
+msOcc_l <- readRDS("Derived/msOcc_l_all_sites_100.rds")
 
 ## Load data
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
@@ -288,8 +288,8 @@ end - start
 Occ_mod <- ms_100
   
 # >Save model -------------------------------------------------------------
-save_path <- paste0("Rdata/Model_output/Occ_mod_", N_spp, "spp", N_ecor, "ecor_restrict_phi", Sys.Date(), ".rds")
-#Occ_mod <- readRDS("Rdata/Model_output/Occ_mod_42spp_causal2026-03-12.rds")
+save_path <- paste0("Derived/Model_output/Occ_mod_", N_spp, "spp", N_ecor, "ecor_restrict_phi", Sys.Date(), ".rds")
+#Occ_mod <- readRDS("Derived/Model_output/Occ_mod_42spp_causal2026-03-12.rds")
 saveRDS(Occ_mod, save_path)
 rm(list = ls()[!(ls() %in% c("msOcc_l", "Occ_mod", "Row_identifier"))])
 source("Scripts/spOcc_fns.R")

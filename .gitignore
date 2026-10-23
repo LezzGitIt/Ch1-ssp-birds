@@ -28,7 +28,6 @@ _extensions/*
 
 # Repo structure
 Derived/*
-Rdata/*
 Figures/*
 
 # Example code in package build process
