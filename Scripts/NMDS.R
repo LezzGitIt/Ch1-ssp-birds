@@ -62,9 +62,9 @@ msOcc_l <- readRDS("Derived/Rdata/Model_input/msOcc_l_meta_99_ref.rds")
 #Occ_mod <- readRDS("Derived/Rdata/Model_output/Before_Oct_26/Occ_mod_99spp_1ecor_int_Dist_forest2026-05-06.rds")
 
 # Build per-draw community matrices ------------------------------------------
-# This data is already Meta-department-only (Departamento == "Meta" for every row); just exclude Mosaic
+# This data is already Meta-department-only (Department == "Meta" for every row); just exclude Mosaic
 site_idx <- which(msOcc_l$occ.covs$Habitat != "Mosaic")
-site_meta <- msOcc_l$occ.covs[site_idx, c("Id_muestreo", "Habitat")]
+site_meta <- msOcc_l$occ.covs[site_idx, c("Id_survey", "Habitat")]
 # Translate to English for the figure - recoded here (not just in the legend labels) so every
 # downstream Habitat-grouped object (ellipses, species_candidates, etc.) already carries the
 # English term, with nothing left keyed to the Spanish original.

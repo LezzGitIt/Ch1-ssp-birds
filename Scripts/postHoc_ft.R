@@ -18,7 +18,7 @@ Occ_mod <- readRDS("Derived/Rdata/Model_output/Before_Oct_26/Occ_mod_99spp_1ecor
 # Forest or non-forest? ---------------------------------------------------
 Forest <- FALSE
 if(Forest){
-  variable_posthoc <- "Ano1"
+  variable_posthoc <- "Year1"
 } else{
   variable_posthoc <- "HabitatSsp"
   } 
