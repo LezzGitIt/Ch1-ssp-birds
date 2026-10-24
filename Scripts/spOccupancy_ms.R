@@ -671,15 +671,15 @@ Detectability_re %>%
 
 ## Occupancy random effect - Department
 Department_re <- create.re.tbl(Occ_mod$beta.star.samples) %>% 
-  filter(Group != "Id_group_no_dc") %>% 
-  select(-Group) %>% 
-  rename(Departamento_num = Id) %>% 
-  mutate(Departamento_num = as.numeric(Departamento_num))
+  filter(Group == "Department_num") %>%
+  select(-Group) %>%
+  rename(Department_num = Id) %>%
+  mutate(Department_num = as.numeric(Department_num))
 
 # Plot
-msOcc_l$occ.covs[,c("Departamento", "Departamento_num")] %>% distinct() %>%
-  full_join(Department_re) %>% 
-  ggplot(aes(x = Intercept, color = Departamento)) + 
+msOcc_l$occ.covs[,c("Department", "Department_num")] %>% distinct() %>%
+  full_join(Department_re) %>%
+  ggplot(aes(x = Intercept, color = Department)) +
   geom_density() +
   labs(title = "All regions - 100 species", x = "Log occupancy intercept")
 

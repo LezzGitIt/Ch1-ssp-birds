@@ -35,9 +35,7 @@ Lsm <- read_lsm()
 Site_covs <- read_csv(paste0(Wrangling_repo, Excels, "Site_covs.csv"))
 Event_covs <- read_csv(paste0(Wrangling_repo, Excels, "Event_covs.csv")) %>%
   filter(!Id_survey_no_dc %in% paste0("MB-VC-EH_", Hatico_pc_nums)) %>%
-  left_join(Lsm, by = c("Id_survey", "Year")) %>%
-  # INTERIM: Id_group_no_dc (farm x research question) was dropped upstream; rebuild it by removing the collector prefix from Id_group (e.g. "G-MB-M-A" -> "MB-M-A") until the farm and location random intercepts replace it
-  mutate(Id_group_no_dc = str_remove(Id_group, "^[^-]+-"))
+  left_join(Lsm, by = c("Id_survey", "Year"))
 
 load(paste0(Wrangling_repo, "Rdata/NE_layers_Colombia.Rdata"))
 
@@ -237,7 +235,7 @@ Order_meta_no_forest %in% Bird_pcs_analysis4$Species_ayerbe_
 # Site covariates ---------------------------------------------------------
 ## Covariates that are fixed for a given point count x Year_grp combination
 date_join_ano <- Event_covs %>% 
-  distinct(Id_survey_no_dc, Id_group_no_dc, across(all_of(Row_identifier)), Year, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
+  distinct(Id_survey_no_dc, across(all_of(Row_identifier)), Year, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
 
 Site_covs2 <- Site_covs %>%
   full_join(date_join_ano) %>% 
@@ -248,14 +246,15 @@ Site_covs2 <- Site_covs %>%
   # Some GAICA points were sampled 2x in a single Year_grp across different years. Take the measurement from 2016.
   slice_max(by = all_of(Row_identifier), order_by = Year) %>%
   arrange(across(all_of(Row_identifier))) %>%
-  mutate(Id_scr = ifelse(Id_group_no_dc == "MB-R-OQ", "Oq_farm_id", Id_scr)) %>%
+  # Otún Quimbaya (Risaralda) has no SCR property polygon, so give its points their own Id_scr
+  mutate(Id_scr = ifelse(str_detect(Id_survey_no_dc, "^MB-R-OQ_"), "Oq_farm_id", Id_scr)) %>%
   mutate(
     # Take the earlier of the two years so it is numeric
     Year1 = as.numeric(str_split_i(Year_grp, "-", 1)),
     across(where(is.character), as.factor),
     Ecoregion = relevel(Ecoregion, ref = "Piedemonte")
   ) %>%
-  select(all_of(Row_identifier), Year1, Id_scr, Id_group_no_dc, Uniq_db, Department, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
+  select(all_of(Row_identifier), Year1, Id_survey_no_dc, Farm_name, Id_scr, Uniq_db, Department, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
 
 if(Habitat_split_i){
   Site_covs2 <- Site_covs2 %>% 
@@ -277,12 +276,29 @@ if(Pc_Habitat_i %in% c("Gradient", "All")){
     mutate(Habitat = fct_relevel(Habitat, c("Pastizales", "Mosaic", "Ssp", "Bosque"))) #"Bosque ripario")
 }
 
+## Farm groupings for the occupancy random effects, keyed on department + farm name because farm names repeat across departments (e.g. La pradera, La esperanza)
+# One farm that the data collectors recorded as two (used in every run)
+Farm_same <- c("Meta_La pradera 1" = "Meta_La pradera", "Meta_La pradera 2" = "Meta_La pradera")
+# Alternative grouping (Farm_join_num): neighbouring farms with the same landscape context joined into one unit, based on site knowledge; every other farm stays its own unit
+Farm_join <- c(
+  "Meta_Las palmas" = "Meta_Las palmas + Corinto + El amparo", "Meta_Corinto" = "Meta_Las palmas + Corinto + El amparo", "Meta_El amparo" = "Meta_Las palmas + Corinto + El amparo",
+  "Meta_La candelaria" = "Meta_La candelaria + Las pavas", "Meta_Las pavas" = "Meta_La candelaria + Las pavas",
+  "Meta_La rosania 1" = "Meta_La rosania 1 + El porvenir 1 + La cristalina", "Meta_El porvenir 1" = "Meta_La rosania 1 + El porvenir 1 + La cristalina", "Meta_La cristalina" = "Meta_La rosania 1 + El porvenir 1 + La cristalina",
+  "Meta_Los cambulos 2" = "Meta_Los cambulos 2 + La esmeralda", "Meta_La esmeralda" = "Meta_Los cambulos 2 + La esmeralda"
+)
+
 # Scale numeric values, create numeric random effects
 Site_covs4 <- Site_covs3 %>%
-  mutate(across(where(is.numeric), ~ as.numeric(scale(.))), 
+  mutate(Farm_key = paste(Department, Farm_name, sep = "_"),
+         Farm_key = coalesce(unname(Farm_same[Farm_key]), Farm_key)) %>%
+  mutate(across(where(is.numeric), ~ as.numeric(scale(.))),
          # Categorical random effects have to be specified as numeric in spOccupancy
-         Id_group_no_dc = as.numeric(Id_group_no_dc),
-         Id_scr = as.numeric(Id_scr))
+         Farm_num = as.numeric(factor(Farm_key)),
+         Farm_join_num = as.numeric(factor(coalesce(unname(Farm_join[Farm_key]), Farm_key))),
+         # Point-count location, collector-free, so a point surveyed by several collectors or in several years is one level
+         Id_survey_no_dc = as.numeric(Id_survey_no_dc),
+         Id_scr = as.numeric(Id_scr)) %>%
+  select(-Farm_key)
 
 if(Pc_Habitat_i %in% c("Forest", "All")) {
   Site_covs4 <- Site_covs4 %>% 
