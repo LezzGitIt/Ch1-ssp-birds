@@ -58,8 +58,8 @@ library(ggimage)
 library(magick)
 
 # Load data -----------------------------------------------------------------
-msOcc_l <- readRDS("Derived/msOcc_l_meta_99_ref.rds")
-#Occ_mod <- readRDS("Derived/Model_output/Occ_mod_99spp_1ecor_int_Dist_forest2026-05-06.rds")
+msOcc_l <- readRDS("Derived/Rdata/Model_input/msOcc_l_meta_99_ref.rds")
+#Occ_mod <- readRDS("Derived/Rdata/Model_output/Before_Oct_26/Occ_mod_99spp_1ecor_int_Dist_forest2026-05-06.rds")
 
 # Build per-draw community matrices ------------------------------------------
 # This data is already Meta-department-only (Departamento == "Meta" for every row); just exclude Mosaic
@@ -110,7 +110,7 @@ fit_nmds <- function(mat) {
   metaMDS(mat, k = nmds_k, distance = "bray", autotransform = FALSE, try = try_n, trymax = trymax_n, trace = 0)
 }
 
-nmds_cache <- paste0("Derived/nmds_habitat_posterior_K", K, "_dim", nmds_k, "_distavg.rds")
+nmds_cache <- paste0("Derived/Rdata/nmds/nmds_habitat_posterior_K", K, "_dim", nmds_k, "_distavg.rds")
 if (file.exists(nmds_cache)) {
   cached <- readRDS(nmds_cache)
 } else {

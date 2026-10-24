@@ -235,11 +235,11 @@ Order_meta_no_forest %in% Bird_pcs_analysis4$Species_ayerbe_
 
 # Site covariates ---------------------------------------------------------
 ## Covariates that are fixed for a given point count x Year_grp combination
-date_join_ano <- Event_covs %>% 
+date_join_year <- Event_covs %>% 
   distinct(Id_survey_no_dc, across(all_of(Row_identifier)), Year, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
 
 Site_covs2 <- Site_covs %>%
-  full_join(date_join_ano) %>% 
+  full_join(date_join_year) %>% 
   # Change these two points to "Mosaic". This allows them to be included without biasing any of the landcovers we care more about (ssp, forest)
   mutate(
     Habitat = if_else(Habitat == "Cultivos", "Mosaic", Habitat)
@@ -333,9 +333,9 @@ if(FALSE){ # Slow
     family = "binomial", 
     data = Breed_records[Breed_records$status =="Native",], 
     method = "REML")
-  saveRDS(GAM_region, file = "Derived/Palacios_GAM_region.rds")
+  saveRDS(GAM_region, file = "Derived/Rdata/Palacios_GAM_region.rds")
 }
-GAM_region <- readRDS("Derived/Palacios_GAM_region.rds")
+GAM_region <- readRDS("Derived/Rdata/Palacios_GAM_region.rds")
 
 # Isolate the unique sites X julian day combinations along with relevant covariates
 Sampled_sites <- Event_covs %>% 
@@ -494,11 +494,11 @@ Abund_no_obs2 <- Abund_no_obs %>%
   )
 
 Abund_wide_l <- Abund_no_obs2 %>% 
-  unite(Id_muestreo_ano, all_of(Row_identifier), sep = ".", remove = FALSE) %>%
+  unite(Row_id, all_of(Row_identifier), sep = ".", remove = FALSE) %>%
   arrange(across(all_of(Row_identifier))) %>%
   select(-all_of(Row_identifier)) %>%
   pivot_wider(
-    names_from = Id_muestreo_ano,
+    names_from = Row_id,
     values_from = Count,
     values_fill = 0
   ) %>%
@@ -703,13 +703,13 @@ cutoff <- 15
 Dist_to_pcs2 <- Dist_to_pcs %>%
   left_join(add_year_join) %>% # Add Year_grp 
   arrange(across(all_of(Row_identifier))) %>%
-  unite(Id_muestreo_ano, all_of(Row_identifier), sep = ".", remove = FALSE) %>%
+  unite(Row_id, all_of(Row_identifier), sep = ".", remove = FALSE) %>%
   select(-all_of(Row_identifier))
 
 # Clip using predefined cutoff distance
 Biogeo_clip <- Dist_to_pcs2 %>%  
   mutate(across(where(is.numeric), ~ as.integer(.x < cutoff))) %>%
-  column_to_rownames("Id_muestreo_ano") %>%
+  column_to_rownames("Row_id") %>%
   t() %>% 
   as_tibble()
 
@@ -727,7 +727,7 @@ names(msOcc_l)[2] <- "occ.covs"
 
 # Save object -------------------------------------------------------------
 stop()
-saveRDS(msOcc_l, "Derived/msOcc_l_all_sites_555.rds")
+saveRDS(msOcc_l, "Derived/Rdata/Model_input/msOcc_l_all_sites_555.rds")
 
 # EXTRAS ------------------------------------------------------------------
 # >Checks -----------------------------------------------------------------
@@ -744,20 +744,20 @@ Obs_na_l <- map(Obs_covs_l, \(df){
 check_l <- list(Site_covs3, Obs_covs_l[[1]], Coords_arr)
 names(check_l) <- c("Site_covs3", "Obs_covs_l", "Coords_arr")
 
-Order_id_ano <- map(check_l, \(df){
+Order_row_id <- map(check_l, \(df){
   df %>% 
-    unite(Id_muestreo_ano, all_of(Row_identifier), sep = ".", remove = FALSE) %>% 
-    pull(Id_muestreo_ano)
+    unite(Row_id, all_of(Row_identifier), sep = ".", remove = FALSE) %>% 
+    pull(Row_id)
 })
 
 # All should be TRUE
-table(Order_id_ano$Site_covs3 == Order_id_ano$Obs_covs_l)
-table(Order_id_ano$Obs_covs_l == Order_id_ano$Coords_arr)
-table(names(Abund_wide_l[[1]])[-c(1:2)] == Order_id_ano$Obs_covs_l)
-table(names(Biogeo_clip) == Order_id_ano$Obs_covs_l)
+table(Order_row_id$Site_covs3 == Order_row_id$Obs_covs_l)
+table(Order_row_id$Obs_covs_l == Order_row_id$Coords_arr)
+table(names(Abund_wide_l[[1]])[-c(1:2)] == Order_row_id$Obs_covs_l)
+table(names(Biogeo_clip) == Order_row_id$Obs_covs_l)
 
 # If any problems.. Diagnose
-probs <- which(!Order_id_ano$Site_covs3 == Order_id_ano$Obs_covs_l)
+probs <- which(!Order_row_id$Site_covs3 == Order_row_id$Obs_covs_l)
 Site_covs3 %>% slice(probs) 
 
 # >Species order check ----------------------------------------------------

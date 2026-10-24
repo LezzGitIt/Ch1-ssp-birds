@@ -61,7 +61,7 @@ create_cor_matrix <- function(df, cols, cutoff){
 # Occupancy covs
 Site_covs2 %>%
 create_cor_matrix(
-  cols = c(Year, Elev, Tot_prec, Avg_temp, te, ssp), 
+  cols = c(Year, Tot_prec, Avg_temp, te, ssp, Canopy_cover, Dist_forest), #Elev
   cutoff = .35
   )
 
