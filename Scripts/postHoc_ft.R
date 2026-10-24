@@ -9,9 +9,8 @@ library(posterior)
 library(spOccupancy)
 library(ggdist)
 
-Wrangling_repo <- "../Ssp-bird-data-wrangling/"
-Excels <- "Derived/Excels/"
-Ft <- read_csv(paste0(Wrangling_repo, Excels, "Traits/Functional_traits.csv"))
+## Ch1 trait table built in the sibling Fd-pd repo (01_Ch1_traits.R): the deposit traits plus eye size, BirdLife clutch, nest and incubation traits
+Ft <- read_csv("../Fd-pd/Derived/Functional_traits_ch1.csv")
 
 # Occupancy model output
 Occ_mod <- readRDS("Derived/Rdata/Model_output/Before_Oct_26/Occ_mod_99spp_1ecor_ref_2026-05-06.rds")
@@ -97,8 +96,8 @@ y_draws_eye <- y_draws %>% select(all_of(Spp_eye))
 postHoc_l_eye <- list(y = y_draws_eye, covs = Ft_eye)
 
 # >Life-history -----------------------------------------------------------
-covariates_lh <- c("Habitat.Density", "Migration_avo", "Trophic.Level", "gen_length")
-covariates_specialization <- c("Elev_range_final", "Range.Size", "Forest_bin", "Habitat_breadth", "Diet_breadth") # "Ecological_specialization"
+covariates_lh <- c("Habitat.Density", "Migration_avo", "Trophic.Level", "Gen_length")
+covariates_specialization <- c("Elev_range", "Range.Size", "Forest_bin", "Habitat_breadth", "Diet_breadth") # "Ecological_specialization"
 Ft_lh <- Ft_spp %>% 
   select(Species_ayerbe, all_of(c(covariates_lh, covariates_specialization))) %>%
   # postHocLM cannot accept any missing values in covariates
@@ -106,8 +105,9 @@ Ft_lh <- Ft_spp %>%
 postHoc_l_lh <- list(y = y_draws, covs = Ft_lh)
 
 # >Clutch -----------------------------------------------------------------
-Ft_clutch <- Ft_spp %>% filter(!is.na(Clutch)) %>% 
-  select(Species_ayerbe, Clutch)
+# Clutch_mean (95 of 99 species) rather than BirdLife's Clutch_bl (68 of 99; r = 0.85)
+Ft_clutch <- Ft_spp %>% filter(!is.na(Clutch_mean)) %>%
+  select(Species_ayerbe, Clutch_mean)
 Spp_clutch <- Ft_clutch %>% pull(Species_ayerbe) %>% 
   str_replace(" ", "_")
 y_draws_clutch <- y_draws %>% select(all_of(Spp_clutch))
@@ -117,7 +117,8 @@ postHoc_l_clutch <- list(y = y_draws_clutch, covs = Ft_clutch)
 
 # >Nesting ----------------------------------------------------------------
 # Nest location
-covariates_nest_loc <- c("Nest_ground_bush", "N_nest_locs")
+# N_nest_locs_sheard (Sheard et al. 2024 first; every location across three handbooks) or N_nest_locs_bb (BIRDBASE first; typical substrates); 89 of 99 species each, r = 0.78
+covariates_nest_loc <- c("Nest_ground_bush", "N_nest_locs_sheard")
 Ft_nesting <- Ft_spp %>% 
   select(Species_ayerbe, all_of(covariates_nest_loc)) %>%
   # postHocLM cannot accept any missing values in covariates
@@ -163,7 +164,7 @@ postHoc_morph <- postHocLM(formula = Morph_form , data = postHoc_l_morph)
 postHoc_eye <- postHocLM(formula = ~Eye_resid, data = postHoc_l_eye)
 
 ## Life-history models
-# Lh vars: Range.Size + Elev_range_final + Habitat.Density + Migration + Trophic.Level
+# Lh vars: Range.Size + Elev_range + Habitat.Density + Migration + Trophic.Level
 lh_form <- as.formula(paste("~" , paste(covariates_lh, collapse = " + ")))
 postHoc_lh <- postHocLM(formula = lh_form, data = postHoc_l_lh)
 
@@ -172,7 +173,7 @@ specialization_form <- as.formula(paste("~" , paste(covariates_specialization, c
 postHoc_specialization <- postHocLM(formula = specialization_form, data = postHoc_l_lh)
 
 # Clutch
-postHoc_clutch <- postHocLM(formula = ~Clutch, data = postHoc_l_clutch)
+postHoc_clutch <- postHocLM(formula = ~Clutch_mean, data = postHoc_l_clutch)
 
 ## Nesting 
 Nesting_form <- as.formula(paste("~" , paste(covariates_nest_loc, collapse = " + ")))
@@ -227,17 +228,17 @@ format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye(y_var = param
 # Inspect Threatened species ------------------------------------------------------
 tibble(Species_ayerbe = str_replace(names(y_draws), "_", " "), 
        Response = colMeans(y_draws)) %>% 
-  left_join(Ft[, c("Species_ayerbe", "gen_length")]) %>% 
-  ggplot(aes(x = gen_length, y = Response)) + 
+  left_join(Ft[, c("Species_ayerbe", "Gen_length")]) %>%
+  ggplot(aes(x = Gen_length, y = Response)) +
   geom_point() + 
   geom_smooth()
 
 # Select T&E species
 Spp_te <- Ft %>% 
   mutate(Species_ayerbe_ = str_replace(Species_ayerbe, " ", "_")) %>%
-  filter(iucn_red_list != "LC") %>% 
+  filter(Iucn_red_list != "LC") %>% 
   filter(Species_ayerbe_ %in% Occ_mod$sp.names) %>% 
-  select(Species_ayerbe_, iucn_red_list)
+  select(Species_ayerbe_, Iucn_red_list)
 
 # Plot
 as_draws_df(Occ_mod$beta.samples) %>% 
