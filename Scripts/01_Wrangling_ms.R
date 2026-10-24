@@ -91,8 +91,9 @@ if(Pc_Habitat_i == "Forest"){
 
 Mosaic <- FALSE
 if(!Mosaic){
-  Event_covs <- Event_covs %>% 
-    filter(Habitat != "Mosaic")
+  # Cultivos is recoded to Mosaic further down (Site covariates), so drop it here as well
+  Event_covs <- Event_covs %>%
+    filter(!Habitat %in% c("Mosaic", "Cultivos"))
 }
 
 Cipav_i <- FALSE
