@@ -128,6 +128,114 @@ label_params <- function(param, term_labels){
   })
 }
 
+# Species-level occupancy coefficients against the community distribution they are drawn from: for each term, a histogram of the species' posterior medians (beta.samples) with the community normal N(mu, tau^2) overlaid, using the posterior medians of beta.comm and tau.sq.beta. The histogram is narrower than the curve because each species' estimate is shrunk toward mu (most for species with little data); tau^2 is the model's estimate of the true spread
+plot_species_coefs <- function(model, terms = NULL, term_labels = NULL){
+  spp_tbl <- tibble::tibble(
+    name = colnames(model$beta.samples),
+    estimate = apply(model$beta.samples, 2, stats::median)
+  ) %>%
+    dplyr::mutate(
+      term = stringr::str_remove(name, "-[^-]+$"), # species names contain no "-", so the last "-" separates term and species
+      Species = stringr::str_extract(name, "[^-]+$")
+    )
+  comm_tbl <- tibble::tibble(
+    term = colnames(model$beta.comm.samples),
+    mu = apply(model$beta.comm.samples, 2, stats::median),
+    tau = sqrt(apply(model$tau.sq.beta.samples, 2, stats::median))
+  )
+  if(!is.null(terms)){
+    spp_tbl <- dplyr::filter(spp_tbl, term %in% terms)
+    comm_tbl <- dplyr::filter(comm_tbl, term %in% terms)
+  }
+  # Normal curve over mu +/- 3 tau for each term
+  curve_tbl <- comm_tbl %>%
+    dplyr::reframe(x = seq(mu - 3 * tau, mu + 3 * tau, length.out = 200), density = stats::dnorm(x, mu, tau), .by = term)
+  # Facet labels carry the community mean and SD, so the plot can be read against summary(model)
+  facet_labels <- comm_tbl %>%
+    dplyr::mutate(
+      label = if(is.null(term_labels)) term else label_params(term, term_labels),
+      label = sprintf("%s\nmu = %.2f, tau = %.2f", label, mu, tau)
+    ) %>%
+    dplyr::select(term, label) %>%
+    tibble::deframe()
+  ggplot2::ggplot(spp_tbl, ggplot2::aes(x = estimate)) +
+    ggplot2::geom_vline(xintercept = 0, linetype = "dashed", color = "grey60") +
+    ggplot2::geom_histogram(ggplot2::aes(y = ggplot2::after_stat(density)), bins = 25, fill = "grey75", color = "white") +
+    ggplot2::geom_line(data = curve_tbl, ggplot2::aes(x = x, y = density), color = "#2a78d6", linewidth = 0.8) +
+    ggplot2::geom_vline(data = comm_tbl, ggplot2::aes(xintercept = mu), color = "#2a78d6") +
+    ggplot2::facet_wrap(~ term, scales = "free", labeller = ggplot2::as_labeller(facet_labels)) +
+    ggplot2::labs(x = "Coefficient (logit scale)", y = "Density", caption = "Bars: species posterior medians. Blue: community distribution N(mu, tau^2) and its mean") +
+    ggplot2::theme_bw()
+}
+
+# Posterior samples behind the random intercepts of one process ("occupancy" or "detection"): the species x level deviations (beta.star / alpha.star), the community-level coefficients (beta.comm / alpha.comm) and the random-effect variances (sigma.sq.psi / sigma.sq.p)
+re_samples <- function(model, process = c("occupancy", "detection")){
+  process <- match.arg(process)
+  if(process == "occupancy"){
+    list(star = model$beta.star.samples, comm = model$beta.comm.samples, sigma_sq = model$sigma.sq.psi.samples)
+  } else {
+    list(star = model$alpha.star.samples, comm = model$alpha.comm.samples, sigma_sq = model$sigma.sq.p.samples)
+  }
+}
+
+# Species-specific random intercepts for one grouping variable: each grey point is one species' posterior median deviation for one group level, the black point is the mean across species for that level, and the dashed lines mark +/- 1.96 SD of the fitted random-effect distribution N(0, sigma^2). Each species' deviations are drawn independently, so the mean across species is pulled toward 0 by the model's structure (prior SD about sigma / sqrt(number of species)); a shift shared by all species at one level has no parameter of its own
+plot_re_species <- function(model, group, process = c("occupancy", "detection")){
+  process <- match.arg(process)
+  samples <- re_samples(model, process)
+  re_tbl <- tibble::tibble(
+    name = colnames(samples$star),
+    deviation = apply(samples$star, 2, stats::median)
+  ) %>%
+    tidyr::separate_wider_regex(name, c(Group = "[^-]+", "-", Level = "[^-]+", "-", Species = "[^-]+")) %>%
+    dplyr::filter(Group == group) %>%
+    dplyr::mutate(Level = forcats::fct_reorder(Level, deviation, .fun = mean))
+  re_sd <- sqrt(stats::median(samples$sigma_sq[, group]))
+  ggplot2::ggplot(re_tbl, ggplot2::aes(x = deviation, y = Level)) +
+    ggplot2::geom_vline(xintercept = 0, color = "grey60") +
+    ggplot2::geom_vline(xintercept = c(-1.96, 1.96) * re_sd, linetype = "dashed", color = "grey60") +
+    ggplot2::geom_jitter(height = 0.15, width = 0, alpha = 0.35, size = 1, color = "grey40") +
+    ggplot2::stat_summary(fun = mean, geom = "point", size = 3, color = "black") +
+    ggplot2::labs(
+      x = sprintf("Species-specific deviation from the species %s intercept (logit scale)", process), y = group,
+      caption = sprintf("Grey: one point per species. Black: mean across species. Dashed: +/- 1.96 SD of N(0, sigma^2), sigma = %.2f", re_sd)
+    ) +
+    ggplot2::theme_bw()
+}
+
+# Community-level intercept for each level of one grouping variable, against the global community intercept: within each posterior draw, a level's intercept is the community mean intercept plus the mean of the species deviations for that level, so the intervals carry posterior uncertainty. Dotted lines mark the global mean +/- sigma, the SD of the species x level deviations, for scale. Optional group_sizes (named by level) adds the number of sites or surveys per level to the axis labels
+plot_re_level_means <- function(model, group, process = c("occupancy", "detection"), group_sizes = NULL, ci_level = 0.95){
+  process <- match.arg(process)
+  samples <- re_samples(model, process)
+  probs <- c((1 - ci_level) / 2, 0.5, 1 - (1 - ci_level) / 2)
+  mu_draws <- samples$comm[, "(Intercept)"]
+  star_names <- colnames(samples$star)
+  star_group <- stringr::str_split_i(star_names, "-", 1)
+  star_level <- stringr::str_split_i(star_names, "-", 2)
+  levels_k <- unique(star_level[star_group == group])
+  level_tbl <- purrr::map(levels_k, \(k){
+    level_draws <- mu_draws + rowMeans(samples$star[, star_group == group & star_level == k, drop = FALSE])
+    q <- stats::quantile(level_draws, probs)
+    tibble::tibble(Level = k, low = q[[1]], median = q[[2]], high = q[[3]])
+  }) %>%
+    purrr::list_rbind()
+  if(!is.null(group_sizes)){
+    level_tbl <- level_tbl %>% dplyr::mutate(Level = sprintf("%s (n = %s)", Level, group_sizes[Level]))
+  }
+  level_tbl <- level_tbl %>% dplyr::mutate(Level = forcats::fct_reorder(Level, median))
+  mu_q <- stats::quantile(mu_draws, probs)
+  re_sd <- sqrt(stats::median(samples$sigma_sq[, group]))
+  ggplot2::ggplot(level_tbl, ggplot2::aes(x = median, y = Level)) +
+    ggplot2::annotate("rect", xmin = mu_q[[1]], xmax = mu_q[[3]], ymin = -Inf, ymax = Inf, fill = "#2a78d6", alpha = 0.15) +
+    ggplot2::geom_vline(xintercept = mu_q[[2]], color = "#2a78d6") +
+    ggplot2::geom_vline(xintercept = mu_q[[2]] + c(-1, 1) * re_sd, linetype = "dotted", color = "grey50") +
+    ggplot2::geom_pointrange(ggplot2::aes(xmin = low, xmax = high)) +
+    ggplot2::labs(
+      x = sprintf("Community %s intercept (logit scale)", process), y = group,
+      caption = sprintf("Points: mean intercept across species per level, %g%% CrI. Blue: global mean and CrI. Dotted: global mean +/- sigma (%.2f)", 100 * ci_level, re_sd)
+    ) +
+    ggplot2::theme_bw()
+}
+
 # Landscape metrics (Dist_forest, ssp, te) per point and year, written by 00b_LSM.R in the sibling Farm_diversity repo
 read_lsm <- function(lsm_path = "../Farm_diversity/Derived/Excels/Event_covs_lsm.csv"){
   readr::read_csv(lsm_path, show_col_types = FALSE) %>%

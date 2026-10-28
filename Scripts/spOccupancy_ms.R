@@ -570,6 +570,10 @@ plogis(-2) # Low detection probability
 #ggsave("Figures/alpha_post_8fac.png", bg = "white") #beta
 # Can play with bayesplot::mcmc_dens() function as well, or as.data.frame() to get posterior draws 
   
+# >>Species-level coefficients ----------------------------------------------
+# Occurrence Means in summary(Occ_mod) are the community means (mu) and Occurrence Variances the among-species variances (tau^2) of each coefficient; species coefficients are drawn from N(mu, tau^2)
+plot_species_coefs(Occ_mod, term_labels = Term_labels)
+
 # >z samples --------------------------------------------------------------
 ## Understandt the output z.samples
 # When subsetting the array... rows (posterior samples), columns (species), matrix slice (sites x year_grp)
@@ -695,6 +699,16 @@ msOcc_l$occ.covs[,c("Department", "Department_num")] %>% distinct() %>%
   ggplot(aes(x = Intercept, color = Department)) +
   geom_density() +
   labs(title = "All regions - 100 species", x = "Log occupancy intercept")
+
+## Occupancy random effect - joined farm units
+# Each species has its own deviation for each unit, drawn from N(0, sigma^2) with one sigma^2 shared across species (Occurrence Random Effect Variances in summary(Occ_mod))
+plot_re_species(Occ_mod, group = "Farm_join_num")
+# Community intercept per unit (global mean + mean species deviation for that unit) against the global mean; n = sites per unit
+plot_re_level_means(Occ_mod, group = "Farm_join_num", group_sizes = table(msOcc_l$occ.covs$Farm_join_num))
+
+## Detection random effect - collector team, same two views; n = surveys per team
+plot_re_species(Occ_mod, group = "Collector_team_num", process = "detection")
+plot_re_level_means(Occ_mod, group = "Collector_team_num", process = "detection", group_sizes = table(unlist(msOcc_l$det.covs$Collector_team_num)))
 
 # >Effective spatial range ------------------------------------------------
 # Examine the estimated effective spatial ranges
