@@ -466,8 +466,8 @@ Obs_covs_l2 <- map2(Obs_covs_l, convert_type, \(Obs_covs, type) {
     select(-all_of(Row_identifier))
 })
 
-# Change Collector_team from factor to numeric
-Obs_covs_l2$Collector_team_num <- map_dfr(Obs_covs_l2$Collector_team_num, as.numeric)
+# Change Collector_team from factor to numeric via its labels: each replicate column is its own factor (levels = only the teams present in that column, sorted as text), so as.numeric() alone returns level positions that differ between columns
+Obs_covs_l2$Collector_team_num <- map_dfr(Obs_covs_l2$Collector_team_num, \(x) as.numeric(as.character(x)))
 
 # Abundance formatting ----------------------------------------------------
 ## Join abundance data (just containing points where species was observed) with all the point counts that the species could have been observed at.
@@ -536,10 +536,12 @@ str(Obs_covs_l$Pc_start)
 ### Check from postiron
 spp <- c("Glaucis_hirsutus", "Ardea_alba", "Eudocimus_ruber")
 
-# Check alignment between detection covs and abundance columns
-det_cols <- colnames(Obs_covs_l$Pc_start)[start_det_cols:ncols_det]
+# Check alignment between detection covs (rows = sites) and abundance columns (sites)
+det_rows <- Obs_covs_l$Pc_start %>%
+  unite(Row_id, all_of(Row_identifier), sep = ".") %>%
+  pull(Row_id)
 abu_cols <- colnames(Abund_rep_l[[1]])
-all(det_cols == abu_cols)
+stopifnot(identical(det_rows, abu_cols))
 
 # Compare counts before/after masking
 diag_tbl <- map_dfr(seq_along(Abund_rep_l), \(i){
@@ -707,18 +709,19 @@ Dist_to_pcs2 <- Dist_to_pcs %>%
   select(-all_of(Row_identifier))
 
 # Clip using predefined cutoff distance
-Biogeo_clip <- Dist_to_pcs2 %>%  
+Biogeo_clip <- Dist_to_pcs2 %>%
   mutate(across(where(is.numeric), ~ as.integer(.x < cutoff))) %>%
   column_to_rownames("Row_id") %>%
-  t() %>% 
-  as_tibble()
+  t()
 
-# Revert back to matrix 
-Biogeo_clip_mat <- Biogeo_clip %>% as.matrix()
+# Species (rows) in the same order as y: the distances are in Species_list order, but y is reordered by Spp_order for the latent factors
+Biogeo_clip_mat <- Biogeo_clip[Spp_order, ]
 
 # spOccupancy frame --------------------------------------------------------
 # Multi-species abundance list
-msAbu_l <- list(y = Abund_array, abu.covs = Site_covs4, det.covs = Obs_covs_l2, coords = Coords, range.ind = Biogeo_clip_mat) 
+msAbu_l <- list(y = Abund_array, abu.covs = Site_covs4, det.covs = Obs_covs_l2, coords = Coords, range.ind = Biogeo_clip_mat)
+# spOccupancy matches these by position, so species and sites must be in the same order in y and range.ind
+stopifnot(identical(rownames(Biogeo_clip_mat), dimnames(Abund_array)[[1]]), identical(colnames(Biogeo_clip_mat), colnames(Abund_array[, , 1])))
 
 # Convert abundance to occupancy
 msOcc_l <- msAbu_l
@@ -727,7 +730,13 @@ names(msOcc_l)[2] <- "occ.covs"
 
 # Save object -------------------------------------------------------------
 stop()
-saveRDS(msOcc_l, "Derived/Rdata/Model_input/msOcc_l_all_sites_555.rds")
+Save_name <- "Derived/Rdata/Model_input/msOcc_l_meta_99_no_mosaic_farm_join"
+saveRDS(msOcc_l, paste0(Save_name, ".rds"))
+# Collector-team lookup for this list (team numbers are assigned after subsetting, so they are specific to each list), used to label the detection random effect
+Collector_team_join %>%
+  select(Collector_team_num, Collector_team, Uniq_db, Year_grp, Registered_by) %>%
+  arrange(Collector_team_num) %>%
+  write_csv(paste0(Save_name, "_collector_teams.csv"))
 
 # EXTRAS ------------------------------------------------------------------
 # >Checks -----------------------------------------------------------------
