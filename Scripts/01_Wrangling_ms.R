@@ -700,6 +700,8 @@ if(FALSE){
 # If point is outside of range by more than the cutoff (in km) set to 0, otherwise set to 1. 
 # TO DO - could consider using the actual observed distances in our dataset to inform the cutoff values for each species. At present, the code will eliminate some of our observations (anything further away than the cutoff distance) 
 cutoff <- 15
+# Meta (Gradient) only: exempt species detected beyond the cutoff from clipping (see below)
+Exempt_detected_i <- Pc_Habitat_i == "Gradient"
 
 # Format
 Dist_to_pcs2 <- Dist_to_pcs %>%
@@ -716,6 +718,14 @@ Biogeo_clip <- Dist_to_pcs2 %>%
 
 # Species (rows) in the same order as y: the distances are in Species_list order, but y is reordered by Spp_order for the latent factors
 Biogeo_clip_mat <- Biogeo_clip[Spp_order, ]
+
+# Meta only (Exempt_detected_i): exempt species detected beyond the cutoff. In Meta, the species detected outside their buffered range map (Ortalis guttata, Phaethornis griseogularis, Thamnophilus punctatus) are ones whose maps look wrong for the area, so clipping would discard real detections; these species are treated as in range at every site. Not applied to other subsets, where the maps are to be trusted and detections beyond the cutoff are dropped
+if(Exempt_detected_i){
+  Detected_sites <- apply(Abund_array, c(1, 2), \(x) any(x > 0, na.rm = TRUE))
+  Clip_exempt <- rownames(Biogeo_clip_mat)[rowSums(Detected_sites & Biogeo_clip_mat == 0) > 0]
+  print(Clip_exempt)
+  Biogeo_clip_mat[Clip_exempt, ] <- 1
+}
 
 # spOccupancy frame --------------------------------------------------------
 # Multi-species abundance list
