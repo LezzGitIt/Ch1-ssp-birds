@@ -8,6 +8,7 @@ format:
   pdf: 
     header-includes:
       - |
+        \usepackage[noblocks]{authblk}
         \renewcommand*{\Authsep}{, }
         \renewcommand*{\Authand}{, }
         \renewcommand*{\Authands}{, }

@@ -1,111 +1,303 @@
 ---
 title: "Test pad for math formulas"
+author: "Aaron Skinner"
 editor: visual
 ---
 
+# Notation
+
+The same symbols and subscripts are used throughout.
+
+| Symbol | Meaning | In spOccupancy output |
+|---------------------|------------------------------|---------------------|
+| $i = 1, \dots, I$ | species ($I$ = number of species, 99) | `sp.names` |
+| $j = 1, \dots, J$ | site, i.e. one point count location × year group × season row ($J$ = 460) | rows of `occ.covs` |
+| $k = 1, \dots, K_j$ | replicate survey at site $j$ (up to 5) | columns of `det.covs` |
+| $q = 1, \dots, Q$ | spatial factor ($Q$ = 6) | `n.factors` |
+| $r$ | covariate (one occupancy or detection coefficient) | |
+| $z_{ij}$ | true (latent) occupancy of species $i$ at site $j$: 1 = present, 0 = absent | `z.samples` |
+| $y_{ijk}$ | detection (1) or non-detection (0) of species $i$ at site $j$ on survey $k$ | `y` |
+| $\psi_{ij}$ | occupancy probability, $\Pr(z_{ij} = 1)$ | `psi.samples` |
+| $p_{ijk}$ | detection probability on survey $k$, given the species is present | |
+| $\mathbf X_j$, $\mathbf V_{jk}$ | occupancy covariates of site $j$; detection covariates of survey $jk$ | `X`, `X.p` |
+| $\beta_{0,i}$, $\beta_{r,i}$ | species $i$'s occupancy intercept and slope for covariate $r$ | `beta.samples` |
+| $\alpha_{0,i}$, $\alpha_{r,i}$ | species $i$'s detection intercept and slopes | `alpha.samples` |
+| $\mu_{\beta_r}$, $\tau^2_{\beta_r}$ | community mean and among-species variance of $\beta_{r,i}$ (same for $\alpha$) | `beta.comm.samples`, `tau.sq.beta.samples` |
+| $g[j]$, $\eta_{i,g}$, $\sigma^2_\psi$ | joined-farm unit of site $j$; species $i$'s deviation in unit $g$; their variance | `beta.star.samples`, `sigma.sq.psi.samples` |
+| $t[jk]$, $\varepsilon_{i,t}$, $\sigma^2_p$ | collector team of survey $jk$; species $i$'s deviation for team $t$; their variance | `alpha.star.samples`, `sigma.sq.p.samples` |
+| $\mathbf s_j$ | coordinates of site $j$ | `coords` |
+| $d_{jj'}$ | distance between sites $j$ and $j'$ | |
+| $w_q(\mathbf s_j)$ | value of spatial factor $q$ at site $j$ | `w.samples` |
+| $\phi_q$ | spatial decay of factor $q$; effective range $= 3/\phi_q$ | `theta.samples` (`phi-q`) |
+| $\lambda_{iq}$ | species $i$'s loading on spatial factor $q$ | `lambda.samples` |
+| $\Lambda$ | capital Greek lambda: the loadings matrix, $I$ rows (species) × $Q$ columns (factors), with elements $\lambda_{iq}$ | |
+| $\mathbf C_q$ | $J \times J$ correlation matrix of factor $q$ across sites | |
+
 # Single species
 
-The joint likelihood for parameters $\psi_i$ and $p_i$ is defined by these conditional formulas dependent on the detection history at site $i$
+The joint likelihood for parameters $\psi_j$ and $p_j$ is defined by these conditional formulas dependent on the detection history at site $j$
 
-$$
-\Pr(y_i \mid \psi_i, p_i) =
+$$\Pr(y_j \mid \psi_j, p_j) =
 \begin{cases}
-\psi_i \cdot \text{Binomial}(y_i \mid K, p_i), & \text{if } y_i > 0, \\\\
-\psi_i \cdot \text{Binomial}(0 \mid K, p_i) + (1 - \psi_i), & \text{if } y_i = 0
-\end{cases}
-$$
+\psi_j \cdot \text{Binomial}(y_j \mid K, p_j), & \text{if } y_j > 0, \\\\
+\psi_j \cdot \text{Binomial}(0 \mid K, p_j) + (1 - \psi_j), & \text{if } y_j = 0
+\end{cases}$$
 
 where\
-$\psi_i$ = probability that site $i$ is occupied\
-$p_i$ = probability of detection on a survey, given occupancy\
-$y_i$ = number of detections at site $i$ in $K$ surveys\
+$\psi_j$ = probability that site $j$ is occupied\
+$p_j$ = probability of detection on a survey, given occupancy\
+$y_j$ = number of detections at site $j$ in $K$ surveys\
 $K$ = total number of surveys per site
 
-For example, consider the detection history $y = 1$ out of $K = 5$ surveys. If the sampler proposes \$\\psi = 0.8\$ and \$p = 0.8\$, the likelihood contribution for this site is:
-
-So for example, lets say we have the following detection history: `1, 0, 0, 0, 0`, such that $y = 1$ out of $K = 5$ urveys. In the exploration of the parameter space, if the sampler proposes $\psi$ = 0.8 and $p$ = 0.8, then the likelihood contribution for this site is (pulling from the top formula, given that $y_i > 0$):
+So for example, lets say we have the following detection history: `1, 0, 0, 0, 0`, such that $y = 1$ out of $K = 5$ surveys. In the exploration of the parameter space, if the sampler proposes $\psi$ = 0.8 and $p$ = 0.7, then the likelihood contribution for this site is (pulling from the top formula, given that $y_j > 0$):
 
 ```{r}
 #| label: one-detection
 
-0.8 * dbinom(1, 5, .8)
+0.8 * dbinom(1, 5, .7)
 ```
 
-The log likelihood of this combination of parameters is not very high for this site given the data we observed there. On the other hand, when no detections are observed at site $i$ ($y_i = 0$), the likelihood is a sum over two mutually exclusive possibilities:
+The log likelihood of this combination of parameters is not very high for this site given the data we observed there. On the other hand, when no detections are observed at site $j$ ($y_j = 0$), the likelihood is a sum over two mutually exclusive possibilities:
 
-$$
-\Pr(y_i = 0 \mid \psi_i, p_i) \;=\;
-\psi_i \cdot \Pr(0 \mid K, p_i) + (1 - \psi_i).
-$$
+$$\Pr(y_j = 0 \mid \psi_j, p_j) \;=\;
+\psi_j \cdot \Pr(0 \mid K, p_j) + (1 - \psi_j).$$
 
 The first term is the probability that the species is present but undetected across $K$ surveys, and the second term (after the $+$) is the probability that the species is truly absent. Note in this case we don't observe the *latent occupancy state*, so we marginalize it out.
 
 This calculation is repeated for every site, with contributions accumulated into the joint log-likelihood, then combined with the priors to return the log posterior density for those parameter values:
 
-$$
-\log L(\psi, p \mid \{y_i\}_{i=1}^{n_{\text{sites}}}) \;=\;
-\sum_{i=1}^{n_{\text{sites}}} \log \Pr(y_i \mid \psi, p)
-$$
+$$\log L(\psi, p \mid \{y_j\}_{j=1}^{J}) \;=\;
+\sum_{j=1}^{J} \log \Pr(y_j \mid \psi, p)$$
 
--   $\psi$ = vector of site-level occupancy probabilities ($\psi_1, \psi_2, \dots, \psi_{n_{\text{sites}}}$)\
--   $p$ = vector of site-level detection probabilities ($p_1, p_2, \dots, p_{n_{\text{sites}}}$)\
--   $\{y_i\}_{i=1}^{n_{\text{sites}}}$ = set of detection outcomes across all sites\
--   $n_{\text{sites}}$ = number of sites in the study
+- $\psi$ = vector of site-level occupancy probabilities ($\psi_1, \psi_2, \dots, \psi_J$)\
+- $p$ = vector of site-level detection probabilities ($p_1, p_2, \dots, p_J$)\
+- $\{y_j\}_{j=1}^{J}$ = set of detection outcomes across all sites\
+- $J$ = number of sites in the study
 
 After evaluating the full joint log-posterior (as just described), the NUTS sampler uses an accept/reject step to ensure sampling from the correct distribution.
 
 # Multi-species
 
-We model latent occurence $z$ for species $i$ at site $j$, we model the ecological process of interest
+We model latent occurrence $z_{ij}$ of species $i$ at site $j$, the ecological process of interest
 
-$$
-\begin{aligned}z_{ij} &\sim \text{Bernoulli}(\psi_{ij}) \end{aligned}
-$$
+$$\begin{aligned}z_{ij} &\sim \text{Bernoulli}(\psi_{ij}) \end{aligned}$$
 
-where $\psi$ is the occupancy probability. The data-generating process is then
+where $\psi_{ij}$ is the occupancy probability. The data-generating process is then
 
-$$
-\begin{aligned}y_{ijk} \mid z_{ij} &\sim \text{Bernoulli}(z_{ij} * p_{ijk}) \end{aligned}
-$$
+$$\begin{aligned}y_{ijk} \mid z_{ij} &\sim \text{Bernoulli}(z_{ij} \, p_{ijk}) \end{aligned}$$
 
-where $y_{ijk}$ is the detection non-detection data across $k$ replicates, and $p$ is the probability of detection. The marginal likelihood for one species by site combination is then
+where $y_{ijk}$ is the detection / non-detection of species $i$ at site $j$ on replicate $k$, and $p_{ijk}$ is the probability of detection. The marginal likelihood for one species by site combination is then
 
-$$
-\Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij}) =\begin{cases}\displaystyle\psi_{ij} \prod_{k=1}^K p_{ijk}^{y_{ijk}} (1-p_{ijk})^{1-y_{ijk}},& \text{if } y_{ij} > 0, \\[10pt]\displaystyle\psi_{ij}\prod_{k=1}^K (1-p_{ijk}) + (1-\psi_{ij}),& \text{if } y_{ij} = 0 \end{cases}
-$$
+$$\Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij}) =\begin{cases}\displaystyle\psi_{ij} \prod_{k=1}^{K_j} p_{ijk}^{y_{ijk}} (1-p_{ijk})^{1-y_{ijk}},& \text{if } y_{ij} > 0, \\[10pt]\displaystyle\psi_{ij}\prod_{k=1}^{K_j} (1-p_{ijk}) + (1-\psi_{ij}),& \text{if } y_{ij} = 0 \end{cases}$$
 
-where $y_{ij}$ is the total number of detections across replicate surveys, such that $y_{ij} = \sum_{k=1}^K y_{ijk}$.
+where $y_{ij}$ is the total number of detections across replicate surveys:
 
-$$
-y_{ij} = \sum_{k=1}^K y_{ijk}
-$$
+$$y_{ij} = \sum_{k=1}^{K_j} y_{ijk}$$
 
 The joint log-likelihood across species and sites is then
 
-$$
-\log L(\theta \mid \mathbf y)=\sum_{i=1}^I \sum_{j=1}^J\log \Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij})
-$$
+$$\log L(\theta \mid \mathbf y)=\sum_{i=1}^I \sum_{j=1}^J\log \Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij})$$
 
 where $\theta=\{\beta_{0,i},\boldsymbol{\beta}_i,\alpha_{0,i},\boldsymbol{\alpha}_i\}_{i=1}^I$. The full joint posterior is then
 
-$$
-\log p(\theta \mid \mathbf y)=\sum_{i=1}^I \sum_{j=1}^J\log \Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij})+ \log p(\theta)
-$$
+$$\log p(\theta \mid \mathbf y)=\sum_{i=1}^I \sum_{j=1}^J\log \Pr(\mathbf y_{ij} \mid \psi_{ij}, \mathbf p_{ij})+ \log p(\theta)$$
 
-We can model $\psi_{ij}$ as a function of covariates where $\beta_{0,i}$ is the species-specific intercept, $X_j$ are site-specific covariates and $\beta_i$ are the species-specific slopes that determine occupancy $\psi_{ij}$ for species $i$ at site $j$. Similarly, we model $p_{ijk}$ as a function of the species-specific intercepts $\alpha_{0,i}$, $V_{jk}$ are site and replicate specific covariates and $\alpha_i$ are species-specific slopes
+We model $\psi_{ij}$ as a function of the species-specific intercept $\beta_{0,i}$, the site covariates $\mathbf X_j$ and the species-specific slopes $\boldsymbol\beta_i$. Similarly, we model $p_{ijk}$ as a function of the species-specific intercept $\alpha_{0,i}$, the survey covariates $\mathbf V_{jk}$ and the species-specific slopes $\boldsymbol\alpha_i$:
 
-$$
-\begin{aligned}\text{logit}(\psi_{ij}) &= \beta_{0,i} + \mathbf X_j^\top \boldsymbol{\beta}_i, \\\text{logit}(p_{ijk}) &= \alpha_{0,i} + \mathbf V_{jk}^\top \boldsymbol{\alpha}_i \end{aligned}
-$$
+$$\begin{aligned}\text{logit}(\psi_{ij}) &= \beta_{0,i} + \mathbf X_j^\top \boldsymbol{\beta}_i, \\\text{logit}(p_{ijk}) &= \alpha_{0,i} + \mathbf V_{jk}^\top \boldsymbol{\alpha}_i \end{aligned}$$
 
-Species-specific intercepts drawn from community-level normal distributions characterized by means $\mu$ and variances $\sigma^2$ for the occupancy and detection processes, respectively.
+Each species-specific coefficient, intercepts included, is drawn from its own community normal distribution, independently for each covariate $r$ (spOccupancy has no covariance between coefficients):
 
-$$
-\begin{aligned}\beta_{0,i} &\sim \mathcal N(\mu_{\beta_0}, \sigma_{\beta_0}^2), \\\alpha_{0,i} &\sim \mathcal N(\mu_{\alpha_0}, \sigma_{\alpha_0}^2)\end{aligned}
-$$
+$$\begin{aligned}\beta_{r,i} &\sim \mathcal N(\mu_{\beta_r}, \tau_{\beta_r}^2), \\ \alpha_{r,i} &\sim \mathcal N(\mu_{\alpha_r}, \tau_{\alpha_r}^2)\end{aligned}$$
 
-Species-specific slope vectors were drawn from multivariate normal community distributions with mean vectors $\mu$ and covariance matrices $\Sigma$
+In `summary()`, the **Occurrence Means** are the $\mu_{\beta_r}$ (the average species' coefficient; their SD column is the uncertainty in that average) and the **Occurrence Variances** are the $\tau^2_{\beta_r}$ (how much species differ). For example, HabitatSsp $\mu_{\beta_r} = 0.89$ and $\tau^2_{\beta_r} = 0.65$ ($\tau_{\beta_r} \approx 0.8$) imply about 95% of species between $0.89 \pm 1.6$. The species' own posterior medians are spread less than $\tau_{\beta_r}$ implies, because each is shrunk toward $\mu_{\beta_r}$ (most strongly for species with little data).
 
-$$
-\begin{aligned}\boldsymbol{\beta}_i \sim \mathcal N(\boldsymbol{\mu}_{\beta}, \Sigma_{\beta}),\\ \qquad\boldsymbol{\alpha}_i \sim \mathcal N(\boldsymbol{\mu}_{\alpha}, \Sigma_{\alpha})\end{aligned}
-$$
+# Spatial factor model (`svcMsPGOcc`)
+
+## The model
+
+The primary model adds a random intercept for the joined-farm unit and a spatial term built from $Q = 6$ spatial factors (`n.factors = 6`). The occupancy and detection linear predictors for species $i$ at site $j$ (survey $k$) are
+
+$$\text{logit}(\psi_{ij}) = \beta_{0,i} + \mathbf X_j^\top \boldsymbol{\beta}_i + \sum_{q=1}^{Q} \lambda_{iq}\, w_q(\mathbf s_j) + \eta_{i,g[j]}$$ {#eq-occ}
+
+$$\text{logit}(p_{ijk}) = \alpha_{0,i} + \mathbf V_{jk}^\top \boldsymbol{\alpha}_i + \varepsilon_{i,t[jk]}$$ {#eq-det}
+
+The spatial term $\sum_q \lambda_{iq} w_q(\mathbf s_j)$ is species $i$'s spatial effect at site $j$: the $Q$ spatial factors $w_q$ are surfaces shared by all species, and each species weights them by its own loadings $\lambda_{iq}$. The loadings enter occupancy only here; they do not enter detection.
+
+The random effects are species × level deviations: $\eta_{i,g} \sim \mathcal N(0, \sigma^2_\psi)$ for each species $i$ and joined-farm unit $g$ (99 × 13 values), and $\varepsilon_{i,t} \sim \mathcal N(0, \sigma^2_p)$ for each species $i$ and collector team $t$ (99 × 10). One variance is shared by all species, so $\sigma_\psi$ is the SD of a single species' intercept shift between units: a unit can raise occupancy for one species and lower it for another. Averaged across species the deviations are pulled toward 0 by this structure (prior SD about $\sigma_\psi / \sqrt{I}$); a shift shared by all species in one unit has no parameter of its own.
+
+## The spatial factors
+
+Each spatial factor $q$ takes one value at every site, collected in the vector $\mathbf w_q = \big(w_q(\mathbf s_1), \dots, w_q(\mathbf s_J)\big)^\top$, which has a multivariate normal distribution with mean 0 and correlation matrix $\mathbf C_q$:
+
+$$\mathbf w_q \sim \mathcal N(\mathbf 0, \mathbf C_q), \qquad [\mathbf C_q]_{jj'} = \text{Corr}\big(w_q(\mathbf s_j), w_q(\mathbf s_{j'})\big) = \exp(-\phi_q \, d_{jj'})$$ {#eq-gp}
+
+$\mathbf C_q$ is the $J \times J$ matrix whose entry in row $j$, column $j'$ is the correlation between the factor's values at sites $j$ and $j'$, which depends only on the distance $d_{jj'}$ between them (the exponential correlation function). Its diagonal is 1: the variance of each factor is fixed at 1, because its scale is carried by the loadings. This is a Gaussian process, written $w_q \sim \text{GP}(0, \mathbf C_q)$ when the surface is considered at every possible location, not just at the sampled sites. spOccupancy approximates it with a nearest-neighbour Gaussian process (NNGP, `n.neighbors = 5`), which conditions each site on its 5 nearest previously ordered sites instead of on all $J$.
+
+$\phi_q$ is the spatial decay of factor $q$. The effective range is the distance at which the correlation drops to 0.05: $\exp(-3) \approx 0.05$, so effective range $= 3 / \phi_q$. There is one $\phi_q$ per factor, not per species.
+
+The loadings matrix $\Lambda$ ($I \times Q$: one row per species, one column per factor) has its upper triangle fixed at 0 and its diagonal fixed at 1 for identifiability; the remaining $\lambda_{iq}$ have $\mathcal N(0, 1)$ priors, so they can be positive or negative.
+
+## What the loadings imply
+
+**1. Spatial autocorrelation within a species.** Because each $w_q$ has variance 1 and the factors are independent of each other, the covariance of species $i$'s spatial effect between two sites a distance $d$ apart is
+
+$$\text{Cov}_i(d) = \sum_{q=1}^{Q} \lambda_{iq}^2 \exp(-\phi_q d)$$ {#eq-cov-i}
+
+and its correlation is that covariance divided by its value at $d = 0$:
+
+$$\text{Corr}_i(d) = \frac{\sum_{q} \lambda_{iq}^2 \exp(-\phi_q d)}{\sum_{q} \lambda_{iq}^2}$$ {#eq-corr-i}
+
+The loadings enter squared, so a negative loading flips the direction of a species' response to a surface (it is less likely to occupy sites where the surface is high) but cannot make it more correlated far away than close by: $\text{Corr}_i(d)$ is a weighted average of decreasing curves with positive weights, so it always decreases with distance.
+
+The loadings do shape each species' decay curve, but only when the factors differ in $\phi_q$: a species loading mostly on a short-range factor would decay fast, one loading mostly on a long-range factor slowly. When all $\phi_q$ are equal, $\exp(-\phi d)$ factors out of @eq-corr-i and the loadings cancel, so every species has the same correlation curve, $\exp(-\phi d)$; the loadings then set only the size of each species' spatial effect (its variance, $\sum_q \lambda_{iq}^2$) and its direction. In the fitted models all six $\phi_q$ are nearly identical, so the species' curves are too (@tbl-species-corr).
+
+**2. Residual correlation between species.** At the same site, the covariance between the spatial effects of species $i$ and $i'$ is
+
+$$\text{Cov}_{ii'} = \sum_{q=1}^{Q} \lambda_{iq}\, \lambda_{i'q}$$ {#eq-cov-ii}
+
+Here the signs matter: species loading in the same direction on a factor tend to co-occur beyond what the covariates explain, and species loading in opposite directions tend to replace each other. This is the joint species distribution part of the model.
+
+**Infinite range.** As the effective range grows, $\phi_q \to 0$ and $\exp(-\phi_q d) \to 1$ for every pair of sites, so each surface becomes a constant, $w_q(\mathbf s_j) = c_q$ at every site. The spatial term for species $i$ is then $\sum_q \lambda_{iq} c_q$, one number for that species, identical at every site, which is exactly what the species intercept $\beta_{0,i}$ already does. The two can no longer be told apart. The fitted ranges sit at the upper edge of the prior (24.6 km with a 25 km maximum, 39.3 km with a 40 km maximum), meaning the fit moves toward longer-range surfaces whenever it is allowed to.
+
+**Spatially varying coefficients.** `svc.cols = 1` makes only the intercept vary in space. Adding a covariate's column (e.g. `svc.cols = c(1, 2)`) gives that coefficient its own $Q$ spatial factors and loadings, $\beta_{r,i}(\mathbf s_j) = \beta_{r,i} + \sum_q \lambda^{(r)}_{iq} w^{(r)}_q(\mathbf s_j)$, so species $i$'s slope changes across space. It changes smoothly, following the Gaussian process (nearby sites have similar slopes), not independently at each site.
+
+## Decay curves
+
+@fig-decay-theory evaluates @eq-gp for effective ranges of 25 and 40 km (the upper bounds of the two priors that ran), plus 5 km for contrast: what a spatial process capturing local (between-farm) structure would look like. Nothing is simulated: the y-axis is $\text{Corr}\big(w_q(\mathbf s), w_q(\mathbf s')\big) = \exp(-\phi_q d)$ with $\phi_q = 3 / \text{range}$.
+
+```{r}
+#| label: fig-decay-theory
+#| fig-cap: "Correlation of a spatial factor between two sites against the distance between them (@eq-gp), for effective ranges of 5, 25 and 40 km. Dashed line: correlation 0.05, which defines the effective range. Grey vertical lines: 1 km (neighbouring points on a transect), 2.6 km (across a joined-farm unit), 16.4 km (median distance between sites) and 65.9 km (maximum distance)."
+#| message: false
+#| warning: false
+library(tidyverse)
+
+# Effective ranges (km) to compare; phi = 3 / range. 5 km is a contrast, not a fitted value
+ranges_km <- c(5, 25, 40)
+# Reference distances (km): neighbouring points on a transect, across a joined-farm unit, median and maximum distance between points in the Meta data list
+ref_km <- c(1, 2.6, 16.4, 65.9)
+range_colors <- c("5 km" = "#1baf7a", "25 km" = "#2a78d6", "40 km" = "#eb6834")
+
+decay_df <- expand_grid(range_km = ranges_km, d_km = seq(0, 70, by = 0.1)) %>%
+  mutate(
+    phi = 3 / range_km,
+    corr = exp(-phi * d_km),
+    Range = factor(paste(range_km, "km"), levels = names(range_colors))
+  )
+
+decay_df %>%
+  ggplot(aes(d_km, corr, color = Range)) +
+  geom_vline(xintercept = ref_km, color = "grey85", linewidth = 0.4) +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "grey60", linewidth = 0.4) +
+  geom_line(linewidth = 0.9) +
+  annotate("text", x = 69, y = 0.08, label = "0.05 = effective range", hjust = 1, size = 3, color = "grey40") +
+  scale_color_manual(values = range_colors) +
+  # Reference distances below 5 km are drawn as lines but not labelled (labels would collide); their values are in the table below
+  scale_x_continuous(breaks = c(0, 5, 16.4, 25, 40, 66), labels = c("0", "5", "16.4", "25", "40", "66")) +
+  labs(x = "Distance between sites (km)", y = "Correlation of the spatial factor", color = "Effective range") +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
+```
+
+```{r}
+#| label: tbl-decay-theory
+#| tbl-cap: "Correlation at the reference distances of @fig-decay-theory."
+decay_df %>%
+  filter(round(d_km, 1) %in% ref_km) %>%
+  select(Range, d_km, corr) %>%
+  pivot_wider(names_from = Range, values_from = corr) %>%
+  mutate(across(-d_km, ~ round(.x, 2))) %>%
+  knitr::kable(col.names = c("Distance (km)", names(range_colors)))
+```
+
+@fig-decay-surfaces is an aid to intuition, not a result: it draws one random spatial factor (one possible $w_q$) along a straight 66 km line for each range, from the same random numbers so that only the range differs. It shows what a range means for the surface itself.
+
+```{r}
+#| label: fig-decay-surfaces
+#| fig-cap: "One simulated spatial factor $w_q$ along a 66 km line (the extent of the Meta data list) for effective ranges of 5, 25 and 40 km, drawn from the same random numbers."
+set.seed(1)
+x_km <- seq(0, 66, length.out = 300)
+z <- rnorm(length(x_km)) # shared standard-normal draws, so the surfaces differ only by range
+
+sim_df <- map(ranges_km, function(r) {
+  corr_mat <- exp(-(3 / r) * as.matrix(dist(x_km)))
+  tibble(x_km = x_km, w = as.vector(t(chol(corr_mat)) %*% z), Range = factor(paste(r, "km"), levels = names(range_colors)))
+}) %>% list_rbind()
+
+sim_df %>%
+  ggplot(aes(x_km, w, color = Range)) +
+  geom_hline(yintercept = 0, color = "grey70", linewidth = 0.4) +
+  geom_line(linewidth = 0.8) +
+  scale_color_manual(values = range_colors) +
+  labs(x = "Position along line (km)", y = expression(w[q](s)), color = "Effective range") +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
+```
+
+An exponential-correlation surface is rough at small scales whatever its range (the curve in @fig-decay-theory has a kink at $d = 0$), so the 25 and 40 km surfaces look jagged and nearly identical close up. What the range controls is how far the broad ups and downs extend: at 5 km the surface swings independently every few kilometres, while at 25 or 40 km it wanders slowly, so whole groups of farms sit on the same high or low stretch. "Long range" therefore means correlation that persists over long distances, not a locally smooth surface.
+
+## Decay in the fitted model
+
+The figures below use a fitted model. It was fit before the collector-team and range-matrix fixes to the data list (2026-10-27), so the numbers will shift slightly after the refit; change `model_path` to the refit model then.
+
+```{r}
+#| label: load-fit
+#| cache: true
+#| message: false
+#| warning: false
+# Fitted model whose spatial factors are summarized below; only the pieces needed are kept, since the full object is ~2 GB
+model_path <- "Derived/Rdata/Model_output/Occ_mod_99spp_1ecor_ssp2026-10-24.rds"
+fit <- readRDS(model_path)
+fit_parts <- list(
+  phi = fit$theta.samples[, grep("^phi", colnames(fit$theta.samples))],
+  lambda = fit$lambda.samples,
+  w = fit$w.samples[, , , 1], # draws x factors x sites
+  coords = fit$coords,
+  sp_names = fit$sp.names
+)
+rm(fit); invisible(gc())
+```
+
+@fig-decay-fitted is @fig-decay-theory with the fitted $\phi_q$: for each posterior draw of $\phi_q$, the curve $\exp(-\phi_q d)$, summarized as a median line and 95% credible band for each of the six factors.
+
+```{r}
+#| label: fig-decay-fitted
+#| fig-cap: "Fitted correlation curves of the six spatial factors (@eq-gp): posterior median (lines) and 95% credible band, from the posterior draws of each $\\phi_q$. The six curves overlap almost entirely."
+d_grid <- seq(0, 66, by = 0.5)
+fitted_decay <- map(seq_len(ncol(fit_parts$phi)), \(q) {
+  phi_m <- fit_parts$phi[, q] * 1000 # per km (coordinates are in m)
+  curves <- exp(-outer(phi_m, d_grid))
+  tibble(
+    Factor = factor(q), d_km = d_grid,
+    low = apply(curves, 2, quantile, 0.025), med = apply(curves, 2, median), high = apply(curves, 2, quantile, 0.975)
+  )
+}) %>% list_rbind()
+
+fitted_decay %>%
+  ggplot(aes(d_km, med, group = Factor)) +
+  geom_ribbon(aes(ymin = low, ymax = high), fill = "#2a78d6", alpha = 0.08) +
+  geom_line(color = "#2a78d6", linewidth = 0.5, alpha = 0.7) +
+  geom_hline(yintercept = 0.05, linetype = "dashed", color = "grey60", linewidth = 0.4) +
+  labs(x = "Distance between sites (km)", y = "Correlation of the spatial factor") +
+  theme_bw() +
+  theme(panel.grid.minor = element_blank())
+```
+
+**Why there is no empirical decay plot.** A natural check would be an empirical correlogram: pair up the estimated values $w_q(\mathbf s_j)$ at the 460 sites, group the pairs by distance, and see whether their correlation follows @fig-decay-fitted. At this design it cannot tell ranges apart. Surfaces simulated exactly from @eq-gp at the real site coordinates give correlograms that are biased and very noisy: with a 24.6 km range the median correlation is about 0.15 at 1-2.5 km (the curve says 0.8) and turns negative beyond 10 km, and surfaces with a 5 km range give overlapping results, with 95% intervals spanning about -0.6 to +0.6 beyond 2.5 km for both. The study area is only about 2.7 times the range across and the sites sit in 13 clusters, so one surface carries too little independent information about its own decay. The range is estimated through the likelihood instead, and the information it gives is mostly that the posterior piles up at the upper bound of the prior.
+
+@tbl-species-corr answers whether the species' decay curves differ: it evaluates @eq-corr-i for every species, using posterior medians of the loadings and of the $\phi_q$.
+
+```{r}
+#| label: tbl-species-corr
+#| tbl-cap: "Correlation of each species' spatial effect at three distances (@eq-corr-i), summarized across the 99 species. With near-identical $\\phi_q$, the loadings cancel and all species share one curve."
+lambda_med <- matrix(apply(fit_parts$lambda, 2, median), nrow = length(fit_parts$sp_names)) # species x factors (lambda.samples columns run species within factor)
+phi_med_km <- apply(fit_parts$phi, 2, median) * 1000
+species_corr <- map(c(1, 5, 16.4), \(d) {
+  corr_i <- as.vector((lambda_med^2 %*% exp(-phi_med_km * d)) / rowSums(lambda_med^2))
+  tibble(d_km = d, min = min(corr_i), median = median(corr_i), max = max(corr_i))
+}) %>% list_rbind()
+species_corr %>%
+  mutate(across(-d_km, ~ round(.x, 4))) %>%
+  knitr::kable(col.names = c("Distance (km)", "Minimum across species", "Median", "Maximum"))
+```
