@@ -71,6 +71,10 @@ Habitat_split_i <- Subset_cfg %>% pull(Habitat_split)
 Spp_order_i <- Subset_cfg %>% pull(Spp_order)
 Subset_cfg
 
+## Coordinate jitter for the spatial model: rows at the same physical location (stacked seasons / year-groups, and the same point under several collector IDs) need distinct coordinates; ±1 mm left the nearest-neighbour correlation matrices near-singular at the 23-25 km range (condition number ~5e8, intermittent "dpotrf var failed"), while ±2 m (well inside GPS error; nearest distinct locations are 47 m apart) gives ~8e5. Covariates are extracted at the true coordinates; only msOcc_l$coords is jittered
+Coords_jitter_m <- 2
+Coords_seed <- 20261029
+
 ## Subset Event_covs, which subsets the other datasets
 # REMOVE HABITAT IN LEFT_JOIN AND FILTER
 if(Pc_Habitat_i == "Forest"){
@@ -613,10 +617,11 @@ Coords_arr <- Pc_locs_dc_sf %>%
   left_join(add_year_join) %>%
   #anti_join(Rm_tbl) %>%
   arrange(across(all_of(Row_identifier)))
-# Project coordinates for Colombia 
-Coords <- Coords_arr %>% 
-  st_transform(crs = st_crs("EPSG:32618")) %>% 
-  st_jitter(amount = .001) %>% 
+# Project coordinates for Colombia (metres), then jitter by up to Coords_jitter_m (see the configuration at the top) with a fixed seed so the list rebuilds identically
+set.seed(Coords_seed)
+Coords <- Coords_arr %>%
+  st_transform(crs = st_crs("EPSG:32618")) %>%
+  st_jitter(amount = Coords_jitter_m) %>%
   st_coordinates()
 
 # Biogeographic clipping --------------------------------------------------
