@@ -178,8 +178,18 @@ re_samples <- function(model, process = c("occupancy", "detection")){
   }
 }
 
-# Species-specific random intercepts for one grouping variable: each grey point is one species' posterior median deviation for one group level, the black point is the mean across species for that level, and the dashed lines mark +/- 1.96 SD of the fitted random-effect distribution N(0, sigma^2). Each species' deviations are drawn independently, so the mean across species is pulled toward 0 by the model's structure (prior SD about sigma / sqrt(number of species)); a shift shared by all species at one level has no parameter of its own
-plot_re_species <- function(model, group, process = c("occupancy", "detection")){
+# Readable labels for the collector-team random-effect levels, from the lookup that 01_Wrangling_ms.R writes next to each data list (<list>_collector_teams.csv): a named vector, names = Collector_team_num, values = team plus survey years, e.g. "Gaica distancia 1 (2019)", with the observers (Registered_by) on a second line when include_observers = TRUE
+collector_team_labels <- function(lookup_path, include_observers = TRUE){
+  lookup <- readr::read_csv(lookup_path, col_types = readr::cols(.default = "c"))
+  labels <- sprintf("%s (20%s)", stringr::str_replace(lookup$Collector_team, "(\\D)(\\d+)$", "\\1 \\2"), lookup$Year_grp)
+  if(include_observers){
+    labels <- dplyr::if_else(is.na(lookup$Registered_by), labels, paste0(labels, "\n", lookup$Registered_by))
+  }
+  stats::setNames(labels, lookup$Collector_team_num)
+}
+
+# Species-specific random intercepts for one grouping variable: each grey point is one species' posterior median deviation for one group level, the black point is the mean across species for that level, and the dashed lines mark +/- 1.96 SD of the fitted random-effect distribution N(0, sigma^2). Each species' deviations are drawn independently, so the mean across species is pulled toward 0 by the model's structure (prior SD about sigma / sqrt(number of species)); a shift shared by all species at one level has no parameter of its own. Optional level_labels (named by level, e.g. from collector_team_labels()) replaces the level numbers on the axis
+plot_re_species <- function(model, group, process = c("occupancy", "detection"), level_labels = NULL){
   process <- match.arg(process)
   samples <- re_samples(model, process)
   re_tbl <- tibble::tibble(
@@ -188,7 +198,10 @@ plot_re_species <- function(model, group, process = c("occupancy", "detection"))
   ) %>%
     tidyr::separate_wider_regex(name, c(Group = "[^-]+", "-", Level = "[^-]+", "-", Species = "[^-]+")) %>%
     dplyr::filter(Group == group) %>%
-    dplyr::mutate(Level = forcats::fct_reorder(Level, deviation, .fun = mean))
+    dplyr::mutate(
+      Level = if(is.null(level_labels)) Level else dplyr::coalesce(unname(level_labels[Level]), Level),
+      Level = forcats::fct_reorder(Level, deviation, .fun = mean)
+    )
   re_sd <- sqrt(stats::median(samples$sigma_sq[, group]))
   ggplot2::ggplot(re_tbl, ggplot2::aes(x = deviation, y = Level)) +
     ggplot2::geom_vline(xintercept = 0, color = "grey60") +
@@ -202,8 +215,8 @@ plot_re_species <- function(model, group, process = c("occupancy", "detection"))
     ggplot2::theme_bw()
 }
 
-# Community-level intercept for each level of one grouping variable, against the global community intercept: within each posterior draw, a level's intercept is the community mean intercept plus the mean of the species deviations for that level, so the intervals carry posterior uncertainty. Dotted lines mark the global mean +/- sigma, the SD of the species x level deviations, for scale. Optional group_sizes (named by level) adds the number of sites or surveys per level to the axis labels
-plot_re_level_means <- function(model, group, process = c("occupancy", "detection"), group_sizes = NULL, ci_level = 0.95){
+# Community-level intercept for each level of one grouping variable, against the global community intercept: within each posterior draw, a level's intercept is the community mean intercept plus the mean of the species deviations for that level, so the intervals carry posterior uncertainty. Dotted lines mark the global mean +/- sigma, the SD of the species x level deviations, for scale. Optional group_sizes (named by level) adds the number of sites or surveys per level to the axis labels, and optional level_labels (named by level, e.g. from collector_team_labels()) replaces the level numbers
+plot_re_level_means <- function(model, group, process = c("occupancy", "detection"), group_sizes = NULL, level_labels = NULL, ci_level = 0.95){
   process <- match.arg(process)
   samples <- re_samples(model, process)
   probs <- c((1 - ci_level) / 2, 0.5, 1 - (1 - ci_level) / 2)
@@ -218,10 +231,13 @@ plot_re_level_means <- function(model, group, process = c("occupancy", "detectio
     tibble::tibble(Level = k, low = q[[1]], median = q[[2]], high = q[[3]])
   }) %>%
     purrr::list_rbind()
-  if(!is.null(group_sizes)){
-    level_tbl <- level_tbl %>% dplyr::mutate(Level = sprintf("%s (n = %s)", Level, group_sizes[Level]))
-  }
-  level_tbl <- level_tbl %>% dplyr::mutate(Level = forcats::fct_reorder(Level, median))
+  # Labels and sizes are both looked up by the raw level number
+  level_tbl <- level_tbl %>%
+    dplyr::mutate(
+      Label = if(is.null(level_labels)) Level else dplyr::coalesce(unname(level_labels[Level]), Level),
+      Label = if(is.null(group_sizes)) Label else sprintf("%s (n = %s)", Label, group_sizes[Level]),
+      Level = forcats::fct_reorder(Label, median)
+    )
   mu_q <- stats::quantile(mu_draws, probs)
   re_sd <- sqrt(stats::median(samples$sigma_sq[, group]))
   ggplot2::ggplot(level_tbl, ggplot2::aes(x = median, y = Level)) +

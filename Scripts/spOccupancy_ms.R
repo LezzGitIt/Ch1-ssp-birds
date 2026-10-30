@@ -24,7 +24,8 @@ filter <- dplyr::filter
 
 # Create space by removing old models
 rm(list = ls()[!(ls() %in% c())])
-msOcc_l <- readRDS("Derived/Rdata/Model_input/msOcc_l_all_sites_100.rds")
+msOcc_l_path <- "Derived/Rdata/Model_input/msOcc_l_meta_98_hab_fix_jit2.rds"
+msOcc_l <- readRDS(msOcc_l_path)
 
 ## Load data
 Wrangling_repo <- "../Ssp-bird-data-wrangling/"
@@ -669,17 +670,20 @@ Global_mean_sample <- tibble(
 )
 
 ## Detectability random effect - observer team
+# Team names + survey years from the lookup saved with the data list (team numbers are specific to each list)
+Collector_labels <- collector_team_labels(str_replace(msOcc_l_path, "\\.rds$", "_collector_teams.csv"))
 # alpha.star.samples is the deviation from the global mean
 Detectability_re <- create.re.tbl(Occ_mod$alpha.star.samples) %>% 
   mutate(Intercept = Global_mean + Intercept) %>%
   select(-Group) %>% 
-  rename(Collector_team_num = Id)
+  rename(Collector_team_num = Id) %>%
+  mutate(Collector_team = Collector_labels[Collector_team_num])
 
 # Plot
 # Collector_team_join
 Detectability_re %>%
   #filter(Collector_team_num %in% c(1,3, 9, 10)) %>%
-  ggplot(aes(x = Intercept, color = Collector_team_num)) + 
+  ggplot(aes(x = Intercept, color = Collector_team)) + 
   geom_density() + 
   geom_density(data = Global_mean_sample, aes(x = Samples), color = "black") +
   # Global mean
@@ -707,8 +711,9 @@ plot_re_species(Occ_mod, group = "Farm_join_num")
 plot_re_level_means(Occ_mod, group = "Farm_join_num", group_sizes = table(msOcc_l$occ.covs$Farm_join_num))
 
 ## Detection random effect - collector team, same two views; n = surveys per team
-plot_re_species(Occ_mod, group = "Collector_team_num", process = "detection")
-plot_re_level_means(Occ_mod, group = "Collector_team_num", process = "detection", group_sizes = table(unlist(msOcc_l$det.covs$Collector_team_num)))
+# NOTE the SD in summary(Occ_mod) is the species × team deviations:
+plot_re_species(Occ_mod, group = "Collector_team_num", process = "detection", level_labels = Collector_labels)
+plot_re_level_means(Occ_mod, group = "Collector_team_num", process = "detection", group_sizes = table(unlist(msOcc_l$det.covs$Collector_team_num)), level_labels = Collector_labels)
 
 # >Effective spatial range ------------------------------------------------
 # Examine the estimated effective spatial ranges
