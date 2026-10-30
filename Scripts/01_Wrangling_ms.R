@@ -9,13 +9,13 @@ library(chron)
 library(readxl)
 library(sf)
 library(cowplot)
-library(conflicted)
 library(ebirdst)
 library(mgcv)
 ggplot2::theme_set(theme_cowplot())
-conflicts_prefer(dplyr::select)
-conflicts_prefer(dplyr::filter)
-conflicts_prefer(base::match)
+# Pin functions that other attached packages mask (a plain assignment rather than conflicted, which turns every ambiguous call into an error)
+select <- dplyr::select
+filter <- dplyr::filter
+match <- base::match
 
 # Functions
 source("/Users/aaronskinner/Library/CloudStorage/OneDrive-UBC/Academia/Rcookbook/Themes_funs.R")

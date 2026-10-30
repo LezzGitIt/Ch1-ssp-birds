@@ -19,12 +19,12 @@ library(geodata)
 library(terra)
 library(tidyterra)
 library(ggspatial)
-library(conflicted)
 library(patchwork)
 library(magick)
 ggplot2::theme_set(theme_cowplot())
-conflicts_prefer(dplyr::lag)
-conflicts_prefer(dplyr::filter)
+# Pin functions that other attached packages mask (a plain assignment rather than conflicted, which turns every ambiguous call into an error)
+lag <- dplyr::lag
+filter <- dplyr::filter
 
 # Round `x` to the nearest multiple of `base` - used below to bin point-count coordinates into
 # grid cells for overlap counting/jittering (Themes_funs.R, sourced by the sibling script this

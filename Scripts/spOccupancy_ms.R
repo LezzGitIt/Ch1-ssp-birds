@@ -11,12 +11,12 @@ library(coda)
 library(broom.mixed)
 library(ggpubr)
 library(cowplot)
-library(conflicted)
 library(posterior)
 library(ggdist)
 ggplot2::theme_set(theme_cowplot())
-conflicts_prefer(dplyr::select)
-conflicts_prefer(dplyr::filter)
+# Pin functions that other attached packages mask (a plain assignment rather than conflicted, which turns every ambiguous call into an error)
+select <- dplyr::select
+filter <- dplyr::filter
 
 ## Data
 #load("Derived/Occ_abu_inputs_01.28.26.Rdata")

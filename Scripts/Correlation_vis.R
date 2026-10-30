@@ -7,14 +7,14 @@ library(xlsx)
 library(chron)
 library(gridExtra)
 library(mvnormtest)
-library(conflicted)
 library(tidyterra)
 library(terra)
 library(ggspatial)
 ggplot2::theme_set(cowplot::theme_cowplot())
-conflicts_prefer(dplyr::select)
-conflicts_prefer(dplyr::filter)
-conflicts_prefer(purrr::map)
+# Pin functions that other attached packages mask (a plain assignment rather than conflicted, which turns every ambiguous call into an error)
+select <- dplyr::select
+filter <- dplyr::filter
+map <- purrr::map
 source("Scripts/spOcc_fns.R")
 
 ## Load data
