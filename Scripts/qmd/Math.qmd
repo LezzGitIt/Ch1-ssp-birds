@@ -9,16 +9,16 @@ editor: visual
 The same symbols and subscripts are used throughout.
 
 | Symbol | Meaning | In spOccupancy output |
-|---------------------|------------------------------|---------------------|
+|----|----|----|
 | $i = 1, \dots, I$ | species ($I$ = number of species, 99) | `sp.names` |
 | $j = 1, \dots, J$ | site, i.e. one point count location × year group × season row ($J$ = 460) | rows of `occ.covs` |
 | $k = 1, \dots, K_j$ | replicate survey at site $j$ (up to 5) | columns of `det.covs` |
 | $q = 1, \dots, Q$ | spatial factor ($Q$ = 6) | `n.factors` |
-| $r$ | covariate (one occupancy or detection coefficient) | |
+| $r$ | covariate (one occupancy or detection coefficient) |  |
 | $z_{ij}$ | true (latent) occupancy of species $i$ at site $j$: 1 = present, 0 = absent | `z.samples` |
 | $y_{ijk}$ | detection (1) or non-detection (0) of species $i$ at site $j$ on survey $k$ | `y` |
 | $\psi_{ij}$ | occupancy probability, $\Pr(z_{ij} = 1)$ | `psi.samples` |
-| $p_{ijk}$ | detection probability on survey $k$, given the species is present | |
+| $p_{ijk}$ | detection probability on survey $k$, given the species is present |  |
 | $\mathbf X_j$, $\mathbf V_{jk}$ | occupancy covariates of site $j$; detection covariates of survey $jk$ | `X`, `X.p` |
 | $\beta_{0,i}$, $\beta_{r,i}$ | species $i$'s occupancy intercept and slope for covariate $r$ | `beta.samples` |
 | $\alpha_{0,i}$, $\alpha_{r,i}$ | species $i$'s detection intercept and slopes | `alpha.samples` |
@@ -26,12 +26,12 @@ The same symbols and subscripts are used throughout.
 | $g[j]$, $\eta_{i,g}$, $\sigma^2_\psi$ | joined-farm unit of site $j$; species $i$'s deviation in unit $g$; their variance | `beta.star.samples`, `sigma.sq.psi.samples` |
 | $t[jk]$, $\varepsilon_{i,t}$, $\sigma^2_p$ | collector team of survey $jk$; species $i$'s deviation for team $t$; their variance | `alpha.star.samples`, `sigma.sq.p.samples` |
 | $\mathbf s_j$ | coordinates of site $j$ | `coords` |
-| $d_{jj'}$ | distance between sites $j$ and $j'$ | |
+| $d_{jj'}$ | distance between sites $j$ and $j'$ |  |
 | $w_q(\mathbf s_j)$ | value of spatial factor $q$ at site $j$ | `w.samples` |
 | $\phi_q$ | spatial decay of factor $q$; effective range $= 3/\phi_q$ | `theta.samples` (`phi-q`) |
 | $\lambda_{iq}$ | species $i$'s loading on spatial factor $q$ | `lambda.samples` |
-| $\Lambda$ | capital Greek lambda: the loadings matrix, $I$ rows (species) × $Q$ columns (factors), with elements $\lambda_{iq}$ | |
-| $\mathbf C_q$ | $J \times J$ correlation matrix of factor $q$ across sites | |
+| $\Lambda$ | capital Greek lambda: the loadings matrix, $I$ rows (species) × $Q$ columns (factors), with elements $\lambda_{iq}$ |  |
+| $\mathbf C_q$ | $J \times J$ correlation matrix of factor $q$ across sites |  |
 
 # Single species
 
