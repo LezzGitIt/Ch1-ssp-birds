@@ -288,6 +288,13 @@ Farm_join <- c(
   "Meta_Los cambulos 2" = "Meta_Los cambulos 2 + La esmeralda", "Meta_La esmeralda" = "Meta_Los cambulos 2 + La esmeralda"
 )
 
+# Mean and SD that scale() uses below, saved with the data list so plots can show covariates in their original units
+Scaling_occ <- Site_covs3 %>%
+  select(where(is.numeric)) %>%
+  pivot_longer(everything(), names_to = "Covariate", values_to = "Value") %>%
+  summarise(Mean = mean(Value, na.rm = TRUE), SD = sd(Value, na.rm = TRUE), .by = Covariate) %>%
+  mutate(Process = "occupancy")
+
 # Scale numeric values, create numeric random effects
 Site_covs4 <- Site_covs3 %>%
   mutate(Farm_key = paste(Department, Farm_name, sep = "_"),
@@ -416,6 +423,14 @@ Event_covs5 %>% distinct(Uniq_db, Collector_team_num)
 Event_covs6 <- Event_covs5 %>%
   mutate(Rep_season = as.factor(Rep_season), 
          Sampling_day_log = log(Sampling_day))
+
+# Mean and SD that scale() uses below (times of day in seconds), saved with the data list
+Scaling_det <- Event_covs6 %>%
+  select(where(~ is.numeric(.) | inherits(., "hms"))) %>%
+  mutate(across(everything(), as.numeric)) %>%
+  pivot_longer(everything(), names_to = "Covariate", values_to = "Value") %>%
+  summarise(Mean = mean(Value, na.rm = TRUE), SD = sd(Value, na.rm = TRUE), .by = Covariate) %>%
+  mutate(Process = "detection")
 
 # Lengthen then widen dataframe
 Obs_covs_df <- Event_covs6 %>%
@@ -747,6 +762,11 @@ Collector_team_join %>%
   select(Collector_team_num, Collector_team, Uniq_db, Year_grp, Registered_by) %>%
   arrange(Collector_team_num) %>%
   write_csv(paste0(Save_name, "_collector_teams.csv"))
+# Scaling lookup for this list (original-unit mean and SD of every standardized covariate), used to back-transform plot axes
+bind_rows(Scaling_occ, Scaling_det) %>%
+  select(Process, Covariate, Mean, SD) %>%
+  arrange(Process, Covariate) %>%
+  write_csv(paste0(Save_name, "_scaling.csv"))
 
 # EXTRAS ------------------------------------------------------------------
 # >Checks -----------------------------------------------------------------
