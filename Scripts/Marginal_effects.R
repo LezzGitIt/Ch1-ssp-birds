@@ -1,24 +1,31 @@
 ## PhD birds in silvopastoral landscapes ##
 # Marginal-effects plots (predicted occupancy or detection along a covariate, optionally by a categorical covariate such as Habitat) for a fitted spOccupancy multi-species model.
-# The plotted curve is the mean across species of each species' predicted probability, computed within each posterior draw (so the band is posterior uncertainty), at an average farm unit (random effects set to 0, ignore.RE = TRUE) and with no spatial effect; every non-focal covariate is held at its mean (numeric) or reference level (categorical).
-# Same approach as Doser's stPGOcc-effects-plot-example.R (local copy in Extra_scripts/): a grid over the observed range, other covariates at 0 on the scaled axis, a hand-built X.0 with the model's column names, and the model's class switched to its non-spatial counterpart so predict() needs no coordinates. Differences: multi-species (averaged across species per draw), ignore.RE = TRUE because this model has occupancy random effects, and the axis is back-transformed with the scaling saved by 01_Wrangling_ms.R.
+# The plotted curve is the mean across species of each species' predicted probability, computed within each posterior draw (so the band is posterior uncertainty), with random effects (e.g. farm unit) and the spatial effect at 0; every non-focal covariate is held at its mean (numeric) or reference level (categorical).
+# Same approach as Doser's stPGOcc-effects-plot-example.R (local copy in Extra_scripts/): a grid over the observed range, other covariates at 0 on the scaled axis, and a hand-built X.0 with the model's column names. Differences: multi-species (averaged across species per draw), the probabilities are computed directly from the species coefficients (the same fixed-effects prediction as predict() with ignore.RE = TRUE, but it also works for multi-season fits, whose X is a site x period x coefficient array), and the axis is back-transformed with the scaling saved by 01_Wrangling_ms.R.
+# Works for single-season (stacked) and multi-season fits; for a multi-season fit, point the data list at the stacked list it was built from (same covariates, one row per surveyed location-period), which supplies the observed ranges and the scaling.
 
 # Libraries ---------------------------------------------------------------
 library(tidyverse)
 library(spOccupancy)
 
 # Configuration -----------------------------------------------------------
-msOcc_l_path <- "Derived/Rdata/Model_input/msOcc_l_meta_99_bug_fixes.rds"
-Occ_mod_path <- "Derived/Rdata/Model_output/Occ_mod_98spp_1ecor_int_prec_jit1mm_s42_2026-10-31.rds"
+# Stacked list the multi-season fits were built from (spOccupancy_temporal.R)
+msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds"
+
+## One figure per row: the fitted model, a short tag for the file name, and the focal variables. Either focal variable can be NA: no focal_cat gives one curve along focal_cont; no focal_cont gives a point + interval per level. Whether the two interact is decided by the loaded model's formula, not here.
+# Multi-season spatial models without Farm_join (model log rows 86, 88, 89): the primary Habitat x Tot_prec and the two alternative interactions
+plot_specs <- tribble(
+  ~model_tag,      ~Occ_mod_path,                                                                         ~focal_cont,   ~focal_cat,
+  "temporal_prec", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_prec_nofarm_long_2026-10-31.rds", "Tot_prec",    "Habitat",
+  "temporal_year", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_year_nofarm_long_2026-11-01.rds", "Year1",       "Habitat",
+  "temporal_dist", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_dist_nofarm_long_2026-11-01.rds", "Dist_forest", "Habitat"
+)
 
 response <- "occupancy" # "occupancy" or "detection"
-# Either focal variable can be NULL: no focal_cat gives one curve along focal_cont; no focal_cont gives a point + interval per level. Whether the two interact is decided by the loaded model's formula, not here.
-focal_cont <- "Tot_prec"
-focal_cat <- "Habitat"
 # Draw each categorical level in its own panel (with that level's species curves) rather than overlaid in one panel
 facet_by_cat <- FALSE
-# Faint per-species curves (or points); they can only be matched to a community estimate when there is one per panel, so by default they are drawn only then
-show_species <- is.null(focal_cat) || is.null(focal_cont) || facet_by_cat
+# Faint per-species curves (or points); they can only be matched to a community estimate when there is one per panel, so by default (NULL) they are drawn only then
+show_species <- NULL
 # Predict focal_cont only across the values observed for each plotted level, and for the levels at which non-focal categorical covariates are held (e.g. no pasture points lie inside forest), rather than across the full range
 restrict_to_observed <- TRUE
 
@@ -38,192 +45,173 @@ axis_labels <- c(
 # Applied after back-transforming: offsets are added (Year1 is stored as the two-digit first year of the year group), divisors convert units (Pc_start is in seconds)
 axis_offsets <- c(Year1 = 2000)
 axis_divisors <- c(Pc_start = 3600)
+# Axes labelled in whole units every 2 (Year1 would otherwise get ticks such as 2012.5)
+integer_axes <- c("Year1")
 
 # Functions ---------------------------------------------------------------
-# Covariates of one process as a list with one vector per covariate (detection covariates are site x replicate matrices, flattened column-wise so all covariates stay aligned)
-get_covs <- function(data_list, response) {
-  covs <- list(occupancy = data_list$occ.covs, detection = data_list$det.covs)[[response]]
-  if (is.null(covs)) stop("response must be 'occupancy' or 'detection'.")
-  map(covs, \(x) if (is.data.frame(x) || is.matrix(x)) unlist(as.data.frame(x), use.names = FALSE) else x)
-}
+# Fallback for a missing (NA) lookup value
+`%|%` <- function(a, b) if (is.na(a)) b else unname(a)
 
-# Default value for a non-focal covariate: mean for numeric, reference level for factors, otherwise the most common value
-default_value <- function(x) {
-  if (is.numeric(x)) return(mean(x, na.rm = TRUE))
-  if (is.factor(x)) return(levels(x)[1])
-  names(which.max(table(x)))
-}
-
+# Covariate names in a formula term or design-matrix column name (e.g. "I(Pc_start^2)" gives "Pc_start")
 extract_vars <- function(term) {
   setdiff(str_extract_all(term, "[A-Za-z][A-Za-z0-9_.]*")[[1]], c("I", "scale", "log", "exp", "sqrt"))
 }
 
-# Map one side of a design-matrix column name (e.g. "HabitatSsp", "Dist_forest", "I(Pc_start^2)") to its formula term: transformed terms stay intact, a dummy collapses to its covariate (longest covariate name that prefixes it)
-map_term_to_var <- function(term, covs) {
-  if (str_detect(term, "\\(") && any(extract_vars(term) %in% names(covs))) return(term)
-  if (term %in% names(covs)) return(term)
-  candidates <- names(covs)[startsWith(term, names(covs))]
-  if (length(candidates) == 0) stop("Could not map model column '", term, "' to a covariate.")
-  candidates[which.max(nchar(candidates))]
-}
+# One figure: predictions from one fitted model along focal_cont (by focal_cat), axes in original units, saved under Figures/ and printed; covs and scaling come from the data list, settings from the configuration
+make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, covs, scaling, response, settings) {
+  Occ_mod <- readRDS(Occ_mod_path)
+  show_species <- settings$show_species %||% (is.null(focal_cat) || is.null(focal_cont) || settings$facet_by_cat)
 
-# The formula the model was fit with, rebuilt from its design-matrix column names, so every fitted interaction is kept whatever the focal variables
-derive_model_formula <- function(model_cols, covs) {
-  terms <- unique(map_chr(setdiff(model_cols, "(Intercept)"), \(col) {
-    paste(map_chr(strsplit(col, ":", fixed = TRUE)[[1]], map_term_to_var, covs = covs), collapse = ":")
-  }))
-  as.formula(paste("~", paste(terms, collapse = " + ")))
-}
+  ## Model formula, rebuilt from the coefficient names so every fitted interaction is kept whatever the focal variables
+  # Multi-season fits store X as a site x period x coefficient array
+  X <- Occ_mod[[c(occupancy = "X", detection = "X.p")[[response]]]]
+  model_cols <- if (length(dim(X)) == 3) dimnames(X)[[3]] else colnames(X)
+  # Each side of a column name (split at ":") maps to its formula term: covariates and transformed terms stay intact, a dummy (e.g. "HabitatSsp") collapses to its covariate (the longest covariate name that prefixes it)
+  model_terms <- map_chr(setdiff(model_cols, "(Intercept)"), \(col) {
+    sides <- map_chr(strsplit(col, ":", fixed = TRUE)[[1]], \(side) {
+      if (side %in% names(covs) || (str_detect(side, "\\(") && any(extract_vars(side) %in% names(covs)))) return(side)
+      candidates <- names(covs)[startsWith(side, names(covs))]
+      if (length(candidates) == 0) stop("Could not map model column '", side, "' to a covariate.")
+      candidates[which.max(nchar(candidates))]
+    })
+    paste(sides, collapse = ":")
+  }) %>% unique()
+  form <- as.formula(paste("~", paste(model_terms, collapse = " + ")))
+  model_vars <- unique(unlist(map(attr(terms(form), "term.labels"), extract_vars)))
 
-# Prediction grid: focal_cont over its observed range (when restrict_to_observed, only among rows at each plotted level of focal_cat and at the held level of every other categorical covariate), crossed with the observed levels of focal_cat; every other model variable at its default or fixed_vals value, with categorical variables keeping all their levels so model.matrix() builds their columns
-build_pred_df <- function(covs, model_vars, focal_cont, focal_cat, pred_n, restrict_to_observed, fixed_vals) {
-  held <- map(set_names(setdiff(model_vars, c(focal_cont, focal_cat))), \(v) fixed_vals[[v]] %||% default_value(covs[[v]]))
+  ## Prediction grid: focal_cont over its observed range (when restrict_to_observed, only among rows at each plotted level of focal_cat and at the held level of every other categorical covariate), crossed with the observed levels of focal_cat
+  # Every other model variable is held at its fixed_vals value, else its mean (numeric), reference level (factor) or most common value
+  held <- map(set_names(setdiff(model_vars, c(focal_cont, focal_cat))), \(v) {
+    x <- covs[[v]]
+    settings$fixed_vals[[v]] %||% if (is.numeric(x)) mean(x, na.rm = TRUE) else if (is.factor(x)) levels(x)[1] else names(which.max(table(x)))
+  })
   held_cat <- keep(names(held), \(v) !is.numeric(covs[[v]]))
   # Rows observed at the held level of every non-focal categorical covariate
   in_held <- reduce(map(held_cat, \(v) as.character(covs[[v]]) == held[[v]]), `&`, .init = rep(TRUE, length(covs[[model_vars[1]]])))
-  cat_levels <- NULL
-  if (!is.null(focal_cat)) {
-    cat_vec <- covs[[focal_cat]]
-    cat_levels <- intersect(levels(factor(cat_vec)), unique(as.character(cat_vec))) # observed levels, in factor order
-  }
-  cont_grid <- function(x) seq(min(x, na.rm = TRUE), max(x, na.rm = TRUE), length.out = pred_n)
+  # Observed levels of focal_cat, in factor order
+  cat_levels <- if (is.null(focal_cat)) NULL else intersect(levels(factor(covs[[focal_cat]])), unique(as.character(covs[[focal_cat]])))
+  grid_over <- \(x) seq(min(x, na.rm = TRUE), max(x, na.rm = TRUE), length.out = settings$pred_n)
   pred_df <- if (is.null(focal_cont)) {
     tibble(!!focal_cat := cat_levels)
   } else if (is.null(focal_cat)) {
-    tibble(!!focal_cont := cont_grid(if (restrict_to_observed) covs[[focal_cont]][in_held] else covs[[focal_cont]]))
+    tibble(!!focal_cont := grid_over(if (settings$restrict_to_observed) covs[[focal_cont]][in_held] else covs[[focal_cont]]))
   } else {
     map(cat_levels, \(k) {
-      x <- if (restrict_to_observed) covs[[focal_cont]][covs[[focal_cat]] == k & in_held] else covs[[focal_cont]]
-      tibble(!!focal_cont := cont_grid(x), !!focal_cat := k)
+      x <- if (settings$restrict_to_observed) covs[[focal_cont]][covs[[focal_cat]] == k & in_held] else covs[[focal_cont]]
+      tibble(!!focal_cont := grid_over(x), !!focal_cat := k)
     }) %>% list_rbind()
   }
+  # Categorical variables keep all their levels so model.matrix() builds their columns
   if (!is.null(focal_cat)) pred_df[[focal_cat]] <- factor(pred_df[[focal_cat]], levels = levels(factor(covs[[focal_cat]])))
-  for (v in names(held)) {
-    pred_df[[v]] <- if (is.factor(covs[[v]])) factor(held[[v]], levels = levels(covs[[v]])) else held[[v]]
-  }
-  pred_df
-}
+  for (v in names(held)) pred_df[[v]] <- if (is.factor(covs[[v]])) factor(held[[v]], levels = levels(covs[[v]])) else held[[v]]
 
-# Design matrix with exactly the model's columns; stops if a level in the data has no column in the model (e.g. a Mosaic level left in a list whose model was fit without it), which would otherwise be predicted silently as the reference level
-build_X0 <- function(pred_df, formula, model_cols) {
-  X0 <- model.matrix(formula, data = pred_df)
+  ## Design matrix with exactly the model's columns
+  # Stops if a level in the data has no column in the model (e.g. a Mosaic level left in a list whose model was fit without it), which would otherwise be predicted silently as the reference level
+  X0 <- model.matrix(form, data = pred_df)
   missing_cols <- setdiff(model_cols, colnames(X0))
   extra_cols <- setdiff(colnames(X0), model_cols)
   if (length(missing_cols) > 0) stop("Prediction matrix lacks model columns: ", paste(missing_cols, collapse = ", "))
   if (length(extra_cols) > 0) stop("Prediction matrix has columns the model lacks (data and model do not match): ", paste(extra_cols, collapse = ", "))
-  X0[, model_cols, drop = FALSE]
-}
+  X0 <- X0[, model_cols, drop = FALSE]
 
-# Per-species posterior means and the community curve (mean across species within each draw, then quantiles); predict.msPGOcc returns draws x species x predictions
-summarize_predictions <- function(samples, pred_df, sp_names, ci_level) {
-  probs <- c((1 - ci_level) / 2, 0.5, 1 - (1 - ci_level) / 2)
-  spp_mean <- t(apply(samples, c(2, 3), mean))
-  colnames(spp_mean) <- sp_names
+  ## Predicted probabilities with random and spatial effects at 0, for every posterior draw and species (draws x species x predictions, the layout predict() returns); species coefficients are named "<coefficient>-<species>"
+  coefs <- Occ_mod[[c(occupancy = "beta.samples", detection = "alpha.samples")[[response]]]]
+  pred_samples <- vapply(Occ_mod$sp.names, \(sp) {
+    plogis(as.matrix(coefs[, paste(colnames(X0), sp, sep = "-"), drop = FALSE]) %*% t(X0))
+  }, matrix(0, nrow(coefs), nrow(X0))) %>%
+    aperm(c(1, 3, 2))
+
+  ## Per-species posterior means, and the community curve (mean across species within each draw, then quantiles)
+  probs <- c((1 - settings$ci_level) / 2, 0.5, 1 - (1 - settings$ci_level) / 2)
+  spp_mean <- t(apply(pred_samples, c(2, 3), mean))
+  colnames(spp_mean) <- Occ_mod$sp.names
   species_df <- as_tibble(spp_mean) %>%
     mutate(.pred = row_number()) %>%
     pivot_longer(-.pred, names_to = "species", values_to = "mean") %>%
     left_join(mutate(pred_df, .pred = row_number()), by = ".pred")
-  comm_quants <- apply(apply(samples, c(1, 3), mean), 2, quantile, probs = probs)
+  comm_quants <- apply(apply(pred_samples, c(1, 3), mean), 2, quantile, probs = probs)
   mean_df <- mutate(pred_df, .pred = row_number(), low = comm_quants[1, ], mean = comm_quants[2, ], high = comm_quants[3, ])
-  list(species_df = species_df, mean_df = mean_df)
-}
 
-# Back-transform a standardized covariate to its original units with the scaling lookup saved next to the data list
-unscale <- function(x, covariate, scaling, response, offsets, divisors) {
-  s <- filter(scaling, Process == response, Covariate == covariate)
-  if (nrow(s) != 1) return(x) # not a scaled covariate
-  (x * s$SD + s$Mean) / (divisors[covariate] %|% 1) + (offsets[covariate] %|% 0)
-}
-# Fallback for a missing (NA) lookup value
-`%|%` <- function(a, b) if (is.na(a)) b else unname(a)
-
-# Display names for the levels of a categorical covariate, keeping the order of the lookup; levels without a display name keep their own
-relabel_levels <- function(x, labels) {
-  lab <- coalesce(unname(labels[as.character(x)]), as.character(x))
-  factor(lab, levels = unique(c(intersect(labels, lab), lab)))
-}
-
-# Colours for the plotted levels: the configured palette when it covers every level, otherwise ggplot's default hues
-level_palette <- function(levels, colors) {
-  if (all(levels %in% names(colors))) colors[levels] else setNames(scales::hue_pal()(length(levels)), levels)
-}
-
-# Lines along the focal covariate: bold community curve + credible ribbon per level, optional faint species curves, optional one panel per level
-plot_marginal_lines <- function(species_df, mean_df, x_var, cat_var, show_species, facet_by_cat, colors) {
-  if (is.null(cat_var)) {
-    cat_var <- ".level"
-    mean_df[[cat_var]] <- species_df[[cat_var]] <- "All"
-    colors <- c(All = "black")
+  ## Original units and display labels
+  # Back-transform with the scaling saved next to the data list (left as is when focal_cont is not a scaled covariate); display names follow the order of the lookup, and levels without one keep their own
+  focal_scaling <- if (is.null(focal_cont)) NULL else filter(scaling, Process == response, Covariate == focal_cont)
+  to_display <- \(df) {
+    if (!is.null(focal_cont) && nrow(focal_scaling) == 1) {
+      df[[focal_cont]] <- (df[[focal_cont]] * focal_scaling$SD + focal_scaling$Mean) / (settings$axis_divisors[focal_cont] %|% 1) + (settings$axis_offsets[focal_cont] %|% 0)
+    }
+    if (!is.null(focal_cat)) {
+      lab <- coalesce(unname(settings$level_labels[as.character(df[[focal_cat]])]), as.character(df[[focal_cat]]))
+      df[[focal_cat]] <- factor(lab, levels = unique(c(intersect(settings$level_labels, lab), lab)))
+    }
+    df
   }
-  p <- ggplot(mean_df, aes(x = .data[[x_var]]))
-  if (show_species) {
-    p <- p + geom_line(data = species_df, aes(y = mean, group = interaction(species, .data[[cat_var]]), color = .data[[cat_var]]), alpha = 0.12, linewidth = 0.3)
-  }
-  p <- p +
-    geom_ribbon(aes(ymin = low, ymax = high, fill = .data[[cat_var]]), alpha = 0.25) +
-    geom_line(aes(y = mean, color = .data[[cat_var]]), linewidth = 1.2) +
-    scale_color_manual(values = colors, aesthetics = c("color", "fill")) +
-    theme_bw()
-  if (facet_by_cat) p <- p + facet_wrap(vars(.data[[cat_var]])) + theme(legend.position = "none")
-  if (cat_var == ".level") p <- p + guides(color = "none", fill = "none")
-  p
-}
+  species_df <- to_display(species_df)
+  mean_df <- to_display(mean_df)
+  # The configured palette when it covers every plotted level, otherwise ggplot's default hues
+  plot_levels <- if (is.null(focal_cat)) NULL else levels(mean_df[[focal_cat]])
+  plot_colors <- if (is.null(focal_cat)) NULL else if (all(plot_levels %in% names(settings$level_colors))) settings$level_colors[plot_levels] else setNames(scales::hue_pal()(length(plot_levels)), plot_levels)
 
-# Points per level for a categorical focal variable alone: species as jittered points, community mean + credible interval
-plot_marginal_points <- function(species_df, mean_df, x_var, show_species, colors) {
-  p <- ggplot(mean_df, aes(x = .data[[x_var]], y = mean, color = .data[[x_var]]))
-  if (show_species) p <- p + geom_jitter(data = species_df, alpha = 0.3, size = 0.8, width = 0.15, height = 0)
-  p +
-    geom_pointrange(aes(ymin = low, ymax = high), linewidth = 1, size = 0.8, color = "black") +
-    scale_color_manual(values = colors, guide = "none") +
-    theme_bw()
+  ## Plot
+  x_var <- focal_cont %||% focal_cat
+  if (is.null(focal_cont)) {
+    # Categorical focal variable alone: species as jittered points, community mean + credible interval per level
+    marginal_plot <- ggplot(mean_df, aes(x = .data[[x_var]], y = mean, color = .data[[x_var]]))
+    if (show_species) marginal_plot <- marginal_plot + geom_jitter(data = species_df, alpha = 0.3, size = 0.8, width = 0.15, height = 0)
+    marginal_plot <- marginal_plot +
+      geom_pointrange(aes(ymin = low, ymax = high), linewidth = 1, size = 0.8, color = "black") +
+      scale_color_manual(values = plot_colors, guide = "none") +
+      theme_bw()
+  } else {
+    # Lines along focal_cont: bold community curve + credible ribbon per level, optional faint species curves, optional one panel per level; with no categorical variable, a single black curve
+    cat_var <- focal_cat %||% ".level"
+    if (is.null(focal_cat)) {
+      mean_df[[cat_var]] <- species_df[[cat_var]] <- "All"
+      plot_colors <- c(All = "black")
+    }
+    marginal_plot <- ggplot(mean_df, aes(x = .data[[x_var]]))
+    if (show_species) {
+      marginal_plot <- marginal_plot + geom_line(data = species_df, aes(y = mean, group = interaction(species, .data[[cat_var]]), color = .data[[cat_var]]), alpha = 0.12, linewidth = 0.3)
+    }
+    marginal_plot <- marginal_plot +
+      geom_ribbon(aes(ymin = low, ymax = high, fill = .data[[cat_var]]), alpha = 0.25) +
+      geom_line(aes(y = mean, color = .data[[cat_var]]), linewidth = 1.2) +
+      scale_color_manual(values = plot_colors, aesthetics = c("color", "fill")) +
+      theme_bw()
+    if (settings$facet_by_cat) marginal_plot <- marginal_plot + facet_wrap(vars(.data[[cat_var]])) + theme(legend.position = "none")
+    if (is.null(focal_cat)) marginal_plot <- marginal_plot + guides(color = "none", fill = "none")
+  }
+  if (x_var %in% settings$integer_axes) marginal_plot <- marginal_plot + scale_x_continuous(breaks = \(lims) seq(ceiling(lims[1]), floor(lims[2]), by = 2))
+
+  y_lab <- c(occupancy = "Occupancy probability (mean across species)", detection = "Detection probability (mean across species)")[[response]]
+  has_re <- isTRUE(Occ_mod[[c(occupancy = "muRE", detection = "pRE")[[response]]]])
+  re_label <- c(occupancy = "with no spatial effect", detection = "")[[response]]
+  if (has_re) re_label <- paste(c(occupancy = "at an average farm unit", detection = "for an average collector team")[[response]], re_label)
+  caption <- sprintf("%s. Bold: mean across %d species, %g%% CrI, %s; other covariates at their mean or reference level.%s", model_tag, length(Occ_mod$sp.names), 100 * settings$ci_level, str_trim(re_label), if (show_species) " Faint: posterior mean of each species." else "")
+  marginal_plot <- marginal_plot +
+    labs(x = settings$axis_labels[x_var] %|% x_var, y = y_lab, color = NULL, fill = NULL, caption = str_wrap(caption, 110)) +
+    theme(plot.caption = element_text(hjust = 0))
+
+  out_file <- paste0("Figures/marginal_", paste(c(model_tag, tolower(c(focal_cat, focal_cont))), collapse = "_"), if (settings$facet_by_cat) "_facet" else "", ".png")
+  ggsave(out_file, marginal_plot, width = 8, height = 5.5, bg = "white")
+  print(marginal_plot)
+  invisible(marginal_plot)
 }
 
 # Load data ---------------------------------------------------------------
 msOcc_l <- readRDS(msOcc_l_path)
-Occ_mod <- readRDS(Occ_mod_path)
 scaling <- read_csv(str_replace(msOcc_l_path, "\\.rds$", "_scaling.csv"), show_col_types = FALSE)
-
-# Predict -----------------------------------------------------------------
-covs <- get_covs(msOcc_l, response)
-model_cols <- colnames(Occ_mod[[c(occupancy = "X", detection = "X.p")[[response]]]])
-form <- derive_model_formula(model_cols, covs)
-model_vars <- unique(unlist(map(attr(terms(form), "term.labels"), extract_vars)))
-
-pred_df <- build_pred_df(covs, model_vars, focal_cont, focal_cat, pred_n, restrict_to_observed, fixed_vals)
-X0 <- build_X0(pred_df, form, model_cols)
-
-# Fixed effects only: the non-spatial class needs no coordinates, and ignore.RE = TRUE sets the random effects to 0
-Occ_mod_ns <- Occ_mod
-class(Occ_mod_ns) <- "msPGOcc"
-out_pred <- predict(Occ_mod_ns, X.0 = X0, ignore.RE = TRUE, type = response)
-pred_samples <- out_pred[[c(occupancy = "psi.0.samples", detection = "p.0.samples")[[response]]]]
-plot_data <- summarize_predictions(pred_samples, pred_df, Occ_mod$sp.names, ci_level)
-
-# Original units and display labels
-plot_data <- map(plot_data, \(df) {
-  if (!is.null(focal_cont)) df[[focal_cont]] <- unscale(df[[focal_cont]], focal_cont, scaling, response, axis_offsets, axis_divisors)
-  if (!is.null(focal_cat)) df[[focal_cat]] <- relabel_levels(df[[focal_cat]], level_labels)
-  df
-})
-plot_colors <- if (is.null(focal_cat)) NULL else level_palette(levels(plot_data$mean_df[[focal_cat]]), level_colors)
+# Covariates of the plotted process, one vector per covariate (detection covariates are site x replicate matrices, flattened column-wise so all covariates stay aligned)
+covs <- list(occupancy = msOcc_l$occ.covs, detection = msOcc_l$det.covs)[[response]]
+if (is.null(covs)) stop("response must be 'occupancy' or 'detection'.")
+covs <- map(covs, \(x) if (is.data.frame(x) || is.matrix(x)) unlist(as.data.frame(x), use.names = FALSE) else x)
 
 # Plot --------------------------------------------------------------------
-x_var <- focal_cont %||% focal_cat
-y_lab <- c(occupancy = "Occupancy probability (mean across species)", detection = "Detection probability (mean across species)")[[response]]
-re_label <- c(occupancy = "at an average farm unit with no spatial effect", detection = "for an average collector team")[[response]]
-caption <- sprintf("Bold: mean across %d species, %g%% CrI, %s; other covariates at their mean or reference level.%s", length(Occ_mod$sp.names), 100 * ci_level, re_label, if (show_species) " Faint: posterior mean of each species." else "")
-
-marginal_plot <- if (is.null(focal_cont)) {
-  plot_marginal_points(plot_data$species_df, plot_data$mean_df, x_var, show_species, plot_colors)
-} else {
-  plot_marginal_lines(plot_data$species_df, plot_data$mean_df, x_var, focal_cat, show_species, facet_by_cat, plot_colors)
-}
-marginal_plot <- marginal_plot +
-  labs(x = axis_labels[x_var] %|% x_var, y = y_lab, color = NULL, fill = NULL, caption = str_wrap(caption, 110)) +
-  theme(plot.caption = element_text(hjust = 0))
-
-# Export ------------------------------------------------------------------
-out_file <- paste0("Figures/marginal_", paste(tolower(c(focal_cat, focal_cont)), collapse = "_"), if (facet_by_cat) "_facet" else "", ".png")
-ggsave(out_file, marginal_plot, width = 8, height = 5.5, bg = "white")
-print(marginal_plot)
+plot_settings <- list(
+  pred_n = pred_n, ci_level = ci_level, restrict_to_observed = restrict_to_observed, fixed_vals = fixed_vals,
+  facet_by_cat = facet_by_cat, show_species = show_species, level_labels = level_labels, level_colors = level_colors,
+  axis_labels = axis_labels, axis_offsets = axis_offsets, axis_divisors = axis_divisors, integer_axes = integer_axes
+)
+# NA in plot_specs means no focal variable of that kind
+marginal_plots <- pmap(plot_specs, \(model_tag, Occ_mod_path, focal_cont, focal_cat) {
+  make_marginal_plot(Occ_mod_path, model_tag, if (is.na(focal_cont)) NULL else focal_cont, if (is.na(focal_cat)) NULL else focal_cat, covs, scaling, response, plot_settings)
+}) |> set_names(plot_specs$model_tag)
