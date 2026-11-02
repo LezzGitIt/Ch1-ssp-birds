@@ -25,12 +25,13 @@ Run from the repository root (open `Ch1-ssp-birds.Rproj`). Survey tables, point 
 |----|----|
 | `Scripts/01_Wrangling_ms.R` | Builds the multi-species `spOccupancy` data list |
 | `Scripts/Correlation_vis.R` | Screens candidate predictors for collinearity |
-| `Scripts/spOccupancy_ms.R` | Fits the multi-species occupancy models and runs diagnostics |
+| `Scripts/spOccupancy_ms.R` | Fits the stacked multi-species occupancy models (one row per location × survey period) and runs diagnostics |
+| `Scripts/spOccupancy_temporal.R` | Reshapes the stacked data list into the multi-season format (one site per location, year-group × season periods) and fits the multi-season spatial occupancy model (`stMsPGOcc`) and its non-spatial counterpart (`tMsPGOcc`, location random effect); holds the primary model |
 | `Scripts/postHoc_ft.R`, `Scripts/NMDS.R`, `Scripts/Marginal_effects.R`, `Scripts/Plotting.R` | Trait analysis, community composition, marginal effects and the sampling map |
 | `Scripts/spOcc_fns.R` | Shared functions, sourced by the scripts above |
 | `Scripts/DAGs.R`, `Scripts/qmd/Math.qmd` | Causal diagrams and model notation |
 
-`Scripts/_archive/` holds superseded scripts kept for reference. `Data/`, `Derived/`, `Figures/` and `Extra_scripts/` are local and not tracked.
+`Scripts/_archive/` holds superseded scripts kept for reference. `Data/`, `Derived/`, `Figures/`, `Extra_scripts/` and `Docs/` (correspondence drafts) are local and not tracked.
 
 ## Usage
 
