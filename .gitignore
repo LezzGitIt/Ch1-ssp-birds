@@ -20,6 +20,14 @@ _extensions/*
 
 ## Quarto files
 *.spl
+# Quarto / LaTeX render byproducts and rendered PDFs (regenerated on each render)
+Scripts/qmd/*.aux
+Scripts/qmd/*.log
+Scripts/qmd/*.tex
+Scripts/qmd/*.rmarkdown
+Scripts/qmd/*.pdf
+# Default graphics device output from non-interactive R runs
+Rplots.pdf
 /.quarto/
 # knitr and R markdown default cache directories
 *_cache/

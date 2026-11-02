@@ -1,8 +1,8 @@
 ## PhD birds in silvopastoral landscapes ##
-# Multi-season (temporal) spatial multi-species occupancy model (spOccupancy::stMsPGOcc), adapted from Doser's space-time vignette (Extra_scripts/spaceTimeModelsHTML.Rmd): each physical location is one site with one spatial effect, and the year-group x season survey periods are a separate time dimension, so stacked copies of a location no longer need jittered coordinates
+# Multi-season (temporal) spatial multi-species occupancy model (spOccupancy::svcTMsPGOcc with svc.cols = 1, i.e. a spatially varying intercept only), adapted from Doser's space-time vignette (Extra_scripts/spaceTimeModelsHTML.Rmd): each physical location is one site with one spatial effect, and the year-group x season survey periods are a separate time dimension, so stacked copies of a location no longer need jittered coordinates
 # Model family: Bernoulli occupancy and Bernoulli detection with logit links (Polya-Gamma sampler); spatial NNGP exponential process with 6 latent factors; no AR(1) temporal effect (periods are unequally spaced 2013-2026), the trend is carried by the Year1 fixed effect as in the stacked model
 # Non-spatial comparison (spOccupancy::tMsPGOcc): same likelihood and links, no spatial process and no latent factors (tMsPGOcc has neither); periods at a location are linked only through an unstructured location random effect, as in the vignette's tPGOcc example
-# No range clipping: stMsPGOcc has no range.ind (spOccupancy 0.8.0 and 0.8.2); in the stacked list clipping only affects Pheugopedius coraya (309 cells)
+# svcTMsPGOcc with svc.cols = 1 is the same model as stMsPGOcc (seeded runs give bit-identical draws, 2026-11-02) but, unlike stMsPGOcc, accepts range.ind (species x location, so clipping is spatial, not seasonal); tMsPGOcc has no range.ind, so the non-spatial fits are unclipped
 # Run headless with: nohup caffeinate -is Rscript Scripts/spOccupancy_temporal.R <section(s)> > <log> 2>&1 &  (sections: additive, prec, prec_nofarm, prec_nofarm_long, prec_ns, prec_ns_loc, year_nofarm_long, dist_nofarm_long; or smoke for a 10-batch, 1-chain dimension check)
 
 # Load libraries ----------------------------------------------------------
@@ -14,14 +14,14 @@ filter <- dplyr::filter
 
 # Configuration -----------------------------------------------------------
 ## Stacked list the temporal list is built from (one row per location x year-group x season)
-msOcc_l_path <- "Derived/Rdata/Model_input/msOcc_l_meta_98_hab_fix_jit1cm.rds"
-tmsOcc_l_path <- "Derived/Rdata/Model_input/tmsOcc_l_meta_98_hab_fix.rds"
+msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_278_hab_fix.rds"
+tmsOcc_l_path <- "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_278_hab_fix.rds"
 
 ## Site = physical location; time = year-group x season in chronological order (replicates stay the within-season visits, so closure is the same as in the stacked model)
 Site_col <- "Id_survey_no_dc"
 Time_cols <- c("Year_grp", "Season")
 Time_levels <- c("13-14.Early", "13-14.Late", "16-17.Early", "16-17.Late", "19.Early", "22.Early", "24.Early", "25-26.Early")
-## stMsPGOcc needs occupancy covariates in every site x period cell, including periods a location was not surveyed (no detection data there): covariates that describe the period are filled with the period mean, all other time-varying covariates with the location's value from its nearest surveyed period
+## The multi-season models need occupancy covariates in every site x period cell, including periods a location was not surveyed (no detection data there): covariates that describe the period are filled with the period mean, all other time-varying covariates with the location's value from its nearest surveyed period
 Period_covs <- "Year1"
 
 ## Sections to run; command-line arguments override this
@@ -59,12 +59,14 @@ fit_temporal <- function(data, occ.formula, tag, spatial = TRUE, mcmc = mcmc_ful
   # Latent occurrence starting values from the vignette: 1 where the species was detected in that site x period, else 0
   z.inits <- apply(data$y, c(1, 2, 3), function(a) as.numeric(sum(a, na.rm = TRUE) > 0))
   len <- if (smoke) list(n.batch = 10, n.burn = 0, n.thin = 1, n.chains = 1) else mcmc
-  save_path <- paste0("Derived/Rdata/Model_output/Occ_mod_", dim(data$y)[1], "spp_1ecor_temporal_", tag, "_", Sys.Date(), ".rds")
+  save_path <- paste0("Derived/Rdata/Model_output/Temporal/Occ_mod_", dim(data$y)[1], "spp_1ecor_temporal_", tag, "_", Sys.Date(), ".rds")
   if (!smoke && file.exists(save_path)) stop("'", save_path, "' already exists")
+  # Create the output folder up front so a long fit never fails at the save step on a fresh machine
+  dir.create(dirname(save_path), recursive = TRUE, showWarnings = FALSE)
   cat("Started", tag, format(Sys.time()), "\n")
   start <- Sys.time()
   mod <- if (spatial) {
-    stMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data, inits = list(z = z.inits), priors = priors, tuning = list(phi = 2), cov.model = "exponential", NNGP = TRUE, n.neighbors = n.neighbors, n.factors = n.factors, n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
+    svcTMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data, inits = list(z = z.inits), priors = priors, tuning = list(phi = 2), svc.cols = 1, cov.model = "exponential", NNGP = TRUE, n.neighbors = n.neighbors, n.factors = n.factors, n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
   } else {
     tMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data[c("y", "occ.covs", "det.covs")], inits = list(z = z.inits), n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
   }
@@ -75,10 +77,13 @@ fit_temporal <- function(data, occ.formula, tag, spatial = TRUE, mcmc = mcmc_ful
 
 # Build the temporal list -------------------------------------------------
 # Reshape the stacked list (rows = site x time) into the multi-season format of the vignette's hbefTrends data: y is species x site x time x replicate, site-constant occupancy covariates are site vectors, time-varying ones are site x time matrices, detection covariates are site x time x replicate arrays, and coords has one row per site; built once, then read from disk
+msOcc_l <- readRDS(msOcc_l_path)
 if (file.exists(tmsOcc_l_path)) {
   tmsOcc_l <- readRDS(tmsOcc_l_path)
+  # Stop if the saved temporal list was built from a different stacked list (e.g. msOcc_l_path was changed but tmsOcc_l_path was not renamed)
+  if (!identical(dimnames(tmsOcc_l$y)[[1]], dimnames(msOcc_l$y)[[1]]) || sum(tmsOcc_l$y, na.rm = TRUE) != sum(msOcc_l$y, na.rm = TRUE)) stop("'", tmsOcc_l_path, "' does not match '", msOcc_l_path, "' (different species or detections); give tmsOcc_l_path a new name so the temporal list is rebuilt")
+  if (is.null(tmsOcc_l$range.ind) && any(msOcc_l$range.ind == 0)) message("Saved temporal list has no range.ind (built before clipping was added): spatial fits from it are unclipped")
 } else {
-  msOcc_l <- readRDS(msOcc_l_path)
   oc <- msOcc_l$occ.covs
   ## Site and period of every stacked row
   Site_levels <- sort(unique(oc[[Site_col]]))
@@ -112,7 +117,10 @@ if (file.exists(tmsOcc_l_path)) {
   ## One coordinate pair per location
   coords <- apply(msOcc_l$coords, 2, function(col) tapply(col, site_i, mean))
   rownames(coords) <- Site_levels
-  tmsOcc_l <- list(y = y, occ.covs = occ_covs, det.covs = det_covs, coords = coords)
+  ## Range clipping: species x location (the stacked list's range.ind is one column per stacked row, and the range maps do not change between periods)
+  range_ind <- t(apply(msOcc_l$range.ind, 1, function(v) tapply(v, site_i, max)))
+  dimnames(range_ind) <- list(rownames(msOcc_l$range.ind), Site_levels)
+  tmsOcc_l <- list(y = y, occ.covs = occ_covs, det.covs = det_covs, coords = coords, range.ind = range_ind)
   ## Checks: same data as the stacked list, and consistent site order and NA pattern
   stopifnot(
     sum(tmsOcc_l$y, na.rm = TRUE) == sum(msOcc_l$y, na.rm = TRUE),
@@ -120,8 +128,12 @@ if (file.exists(tmsOcc_l_path)) {
     identical(dimnames(tmsOcc_l$y)[[2]], rownames(tmsOcc_l$coords)),
     all(map_lgl(tmsOcc_l$det.covs, ~ identical(is.na(.x), is.na(tmsOcc_l$y[1, , , ])))),
     all(map_lgl(tmsOcc_l$occ.covs, ~ NROW(.x) == n_site)),
-    !anyNA(unlist(tmsOcc_l$occ.covs))
+    !anyNA(unlist(tmsOcc_l$occ.covs)),
+    # Clipping is the same in every stacked row of a location, and no species is detected where it is clipped
+    all(t(apply(msOcc_l$range.ind, 1, function(v) tapply(v, site_i, min))) == range_ind),
+    sum(y[array(range_ind, dim(y)) == 0], na.rm = TRUE) == 0
   )
+  dir.create(dirname(tmsOcc_l_path), recursive = TRUE, showWarnings = FALSE)
   saveRDS(tmsOcc_l, tmsOcc_l_path)
 }
 ## Location index for the non-spatial model's location random effect (not stored in the list; unused by the spatial model)
