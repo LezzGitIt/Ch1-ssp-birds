@@ -60,7 +60,7 @@ Subset_tbl <- expand_grid(
   ) %>% select(Subset_i, everything())
 Subset_tbl #%>% view()
 
-i <- 9 # 3, 9, 15
+i <- 10 # 3, 9, 10, 15
 Subset_cfg <- Subset_tbl %>%
   #filter(Pc_Habitat == "Gradient" & Spp_subset == "All" & Habitat_split == FALSE) #%>% 
   slice(i)
@@ -71,9 +71,11 @@ Habitat_split_i <- Subset_cfg %>% pull(Habitat_split)
 Spp_order_i <- Subset_cfg %>% pull(Spp_order)
 Subset_cfg
 
-## Coordinate jitter for the spatial model: rows at the same physical location (stacked seasons / year-groups, and the same point under several collector IDs) need distinct coordinates; ±1 mm left the nearest-neighbour correlation matrices near-singular at the 23-25 km range (condition number ~5e8, intermittent "dpotrf var failed"), while ±2 m (well inside GPS error; nearest distinct locations are 47 m apart) gives ~8e5. Covariates are extracted at the true coordinates; only msOcc_l$coords is jittered
-Coords_jitter_m <- 2
-Coords_seed <- 20261029
+## Coordinate jitter for the spatial model: rows at the same physical location (stacked seasons / year-groups, and the same point under several collector IDs) need distinct coordinates. Use ±1 mm with a fixed seed (2026-10-30 backtrack fits): ±1 cm and ±2 m mixed badly (loadings ESS ~37-71 vs ~230-330, intercept / Tot_prec Rhats up to > 2), while ±1 mm gave good Rhats; but in the ±1 mm fits the spatial effects at locations with stacked rows barely move (posterior SD ~0.03-0.05 vs ~0.36 in the grid.index fit, ESS ~3), so their apparent convergence may be an artefact (to check with Doser). The multi-season and grid.index models avoid jitter altogether. Most ±1 mm draws put some pair of rows < 0.1 mm apart, which crashes the fit with "dpotrf var failed" (near-singular nearest-neighbour correlation matrices), so the seed is one whose draw keeps the closest pair at 0.123 mm (the only one of seeds 20261029-48 at >= 0.1 mm). Covariates are extracted at the true coordinates; only msOcc_l$coords is jittered
+Coords_jitter_m <- 0.001
+# Minimum distance allowed between any two jittered rows; the jittering step stops if the draw puts a pair closer than this (closest pair 0.1 mm ran fine, 0.02-0.03 mm crashed)
+Coords_min_sep_m <- 1e-4
+Coords_seed <- 20261042
 
 ## Subset Event_covs, which subsets the other datasets
 # REMOVE HABITAT IN LEFT_JOIN AND FILTER
@@ -157,7 +159,7 @@ Ft_abu <- Bird_pcs_analysis3 %>%
   left_join(Ft)
 
 ## Set minimum number of distinct point count locations which in turn sets the number of species
-Num_locs_cutoff <- 0
+Num_locs_cutoff <- 1 # Gradient, all species (i = 10), 2026-10-23 data: 5 = 162, 13 = 111, 17 = 102, 18 = 101, 19 = 99, 20 = 97 species
 Ft_abu2 <- Ft_abu %>% mutate(In_out = if_else(n >= Num_locs_cutoff, "In", "Out"))
 Ft_abu3 <- Ft_abu2 %>% filter(In_out == "In")
 
@@ -623,6 +625,8 @@ Coords <- Coords_arr %>%
   st_transform(crs = st_crs("EPSG:32618")) %>%
   st_jitter(amount = Coords_jitter_m) %>%
   st_coordinates()
+Coords_closest_m <- min(dist(Coords))
+if (Coords_closest_m < Coords_min_sep_m) stop("Closest pair of jittered rows is ", signif(Coords_closest_m * 1000, 2), " mm apart (< Coords_min_sep_m); change Coords_seed or Coords_jitter_m")
 
 # Biogeographic clipping --------------------------------------------------
 ## Idea from Socolar's (2022) paper: Biogeographic multi-species occupancy models for large-scale survey data. We only want to include point count locations that are within the species range (+ some buffer), differentiating a true zero (possible but not observed) vs points that are simply out of range (more like an NA).
@@ -760,7 +764,9 @@ names(msOcc_l)[2] <- "occ.covs"
 
 # Save object -------------------------------------------------------------
 stop()
-Save_name <- "Derived/Rdata/Model_input/msOcc_l_meta_99_no_mosaic_farm_join"
+Save_name <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_278_hab_fix"
+# Never overwrite an existing list: fitted models are tied to the exact list they were run on, so each rebuild needs a new Save_name
+if (file.exists(paste0(Save_name, ".rds"))) stop("'", Save_name, ".rds' already exists; choose a new Save_name")
 saveRDS(msOcc_l, paste0(Save_name, ".rds"))
 # Collector-team lookup for this list (team numbers are assigned after subsetting, so they are specific to each list), used to label the detection random effect
 Collector_team_join %>%
