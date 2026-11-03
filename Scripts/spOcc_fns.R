@@ -152,7 +152,21 @@ summarize_fit <- function(fit, save_path = NULL, gof = FALSE){
     percent_problematic = 100 * mean(rhat_param > 1.1 | ess_param < 100),
     n_comm_rhat_gt_1.1 = sum(rhat_comm > 1.1), max_comm_rhat = max(rhat_comm),
     n_beta_rhat_gt_1.1 = sum(fit$rhat$beta > 1.1), n_beta = length(fit$rhat$beta), max_beta_rhat = max(fit$rhat$beta),
-    mean_geweke = if (is.null(fit$lambda.samples)) NA else mean(abs(coda::geweke.diag(coda::as.mcmc(fit$lambda.samples))$z), na.rm = TRUE),
+    # Species-level coefficients (occupancy and detection) above Rhat 1.1, named term-species and sorted worst first
+    species_rhat_gt_1.1 = sort(stats::setNames(c(fit$rhat$beta, fit$rhat$alpha), c(colnames(fit$beta.samples), colnames(fit$alpha.samples)))[c(fit$rhat$beta, fit$rhat$alpha) > 1.1], decreasing = TRUE),
+    # Per spatial factor: share of species whose loading CrI excludes 0, mean absolute loading and median loading ESS; a last factor with few non-zero loadings suggests enough factors, one still loading on many species suggests more are needed. Loadings are ordered species within factor; the fixed loadings (1 on the diagonal, 0 above it) are excluded
+    loadings_by_factor = if (is.null(fit$lambda.samples)) NULL else {
+      lambda <- as.matrix(fit$lambda.samples)
+      factor <- rep(rep(seq_len(fit$q), each = dim(fit$y)[1]), length.out = ncol(lambda))
+      free <- apply(lambda, 2, stats::sd) > 0
+      lambda_ci <- apply(lambda, 2, stats::quantile, c(.025, .5, .975))
+      data.frame(factor = seq_len(fit$q),
+                 n_free = as.vector(tapply(free, factor, sum)),
+                 share_ci_excl_0 = as.vector(tapply((lambda_ci[1, ] > 0 | lambda_ci[3, ] < 0)[free], factor[free], mean)),
+                 mean_abs_loading = as.vector(tapply(abs(lambda_ci[2, ])[free], factor[free], mean)),
+                 median_ess = as.vector(tapply(fit$ESS$lambda[free], factor[free], stats::median)))
+    },
+    mean_geweke =if (is.null(fit$lambda.samples)) NA else mean(abs(coda::geweke.diag(coda::as.mcmc(fit$lambda.samples))$z), na.rm = TRUE),
     waic = waic,
     chain_medians = list(beta.comm = chain_medians(fit$beta.comm.samples), tau.sq.beta = chain_medians(fit$tau.sq.beta.samples), sigma.sq.psi = chain_medians(fit$sigma.sq.psi.samples))
   )
