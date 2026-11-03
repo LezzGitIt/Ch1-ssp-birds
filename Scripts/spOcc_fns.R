@@ -109,6 +109,66 @@ plot_gof <- function(gof_tbl){
           legend.position = "top")
 }
 
+## Fit summary
+# Condense a fitted multi-species model (object or .rds path) into a small list holding everything the model log (spOcc_model_notes.xlsx) records, plus the community-level draws, so a fit made on another machine can be logged and its community effects explored without moving the multi-GB fit; saved as an .rds when save_path is given (default for a path input: the fit's name with a _summary suffix)
+summarize_fit <- function(fit, save_path = NULL, gof = FALSE){
+  if (is.character(fit)) {
+    if (is.null(save_path)) save_path <- sub("\\.rds$", "_summary.rds", fit)
+    fit_file <- basename(fit)
+    fit <- readRDS(fit)
+  } else {
+    fit_file <- if (is.null(save_path)) NA_character_ else sub("_summary\\.rds$", ".rds", basename(save_path))
+  }
+  # Posterior median and 95% CrI of every column of a sample matrix
+  post_quantiles <- function(samples) if (is.null(samples)) NULL else apply(as.matrix(samples), 2, stats::quantile, c(.5, .025, .975))
+  # Posterior median within each chain, to spot a chain stuck in a different mode
+  chain <- rep(seq_len(fit$n.chains), each = fit$n.post)
+  chain_medians <- function(samples) if (is.null(samples)) NULL else t(sapply(seq_len(fit$n.chains), function(k) apply(as.matrix(samples)[chain == k, , drop = FALSE], 2, stats::median)))
+  # Convergence: the share of species-level and spatial parameters with Rhat > 1.1 or ESS < 100 is the log's Percent 'problematic'; loadings (lambda) and spatial effects (w) are excluded from the minimum ESS
+  ess_all <- unlist(fit$ESS[setdiff(names(fit$ESS), c("lambda", "w"))])
+  rhat_param <- c(fit$rhat$beta, fit$rhat$alpha, fit$rhat$theta)
+  ess_param <- c(fit$ESS$beta, fit$ESS$alpha, fit$ESS$theta)
+  rhat_comm <- c(fit$rhat$beta.comm, fit$rhat$tau.sq.beta, fit$rhat$alpha.comm, fit$rhat$tau.sq.alpha)
+  # Multi-season fits return WAIC per species; sum it to the community total
+  waic <- spOccupancy::waicOcc(fit)
+  if (!is.null(dim(waic))) waic <- colSums(waic[, c("elpd", "pD", "WAIC")])
+  git_commit <- tryCatch(system("git rev-parse --short HEAD", intern = TRUE, ignore.stderr = TRUE), error = function(e) NA_character_, warning = function(w) NA_character_)
+  out <- list(
+    file = fit_file, class = class(fit), date = Sys.Date(),
+    machine = paste(Sys.info()[c("sysname", "nodename")], collapse = " "), git_commit = git_commit, spOccupancy_version = as.character(utils::packageVersion("spOccupancy")),
+    n_species = dim(fit$y)[1], n_sites = dim(fit$y)[2], n_periods = if (length(dim(fit$y)) == 4) dim(fit$y)[3] else NA,
+    occ_terms = colnames(fit$beta.comm.samples), det_terms = colnames(fit$alpha.comm.samples),
+    occ_re = colnames(fit$sigma.sq.psi.samples), det_re = colnames(fit$sigma.sq.p.samples),
+    mcmc = c(n.samples = fit$n.samples, n.burn = fit$n.burn, n.thin = fit$n.thin, n.chains = fit$n.chains, n.post = fit$n.post),
+    run_time_hrs = unname(fit$run.time["elapsed"]) / 3600,
+    quantiles = list(beta.comm = post_quantiles(fit$beta.comm.samples), tau.sq.beta = post_quantiles(fit$tau.sq.beta.samples), alpha.comm = post_quantiles(fit$alpha.comm.samples), tau.sq.alpha = post_quantiles(fit$tau.sq.alpha.samples), sigma.sq.psi = post_quantiles(fit$sigma.sq.psi.samples), sigma.sq.p = post_quantiles(fit$sigma.sq.p.samples), theta = post_quantiles(fit$theta.samples)),
+    prob_positive = list(beta.comm = colMeans(as.matrix(fit$beta.comm.samples) > 0), alpha.comm = colMeans(as.matrix(fit$alpha.comm.samples) > 0)),
+    # Community-level draws (a few thousand numbers each) for contrasts, slopes within each habitat and marginal effects without the full fit
+    draws = list(beta.comm = as.matrix(fit$beta.comm.samples), tau.sq.beta = as.matrix(fit$tau.sq.beta.samples), alpha.comm = as.matrix(fit$alpha.comm.samples), tau.sq.alpha = as.matrix(fit$tau.sq.alpha.samples), sigma.sq.psi = if (is.null(fit$sigma.sq.psi.samples)) NULL else as.matrix(fit$sigma.sq.psi.samples), sigma.sq.p = if (is.null(fit$sigma.sq.p.samples)) NULL else as.matrix(fit$sigma.sq.p.samples), theta = if (is.null(fit$theta.samples)) NULL else as.matrix(fit$theta.samples)),
+    rhat = fit$rhat[intersect(c("beta.comm", "tau.sq.beta", "alpha.comm", "tau.sq.alpha", "sigma.sq.psi", "sigma.sq.p", "theta"), names(fit$rhat))],
+    ess = fit$ESS[intersect(c("beta.comm", "tau.sq.beta", "alpha.comm", "tau.sq.alpha", "sigma.sq.psi", "sigma.sq.p", "theta"), names(fit$ESS))],
+    min_ess = ess_all[which.min(ess_all)],
+    loadings_median_ess = if (is.null(fit$ESS$lambda)) NA else stats::median(fit$ESS$lambda[fit$ESS$lambda > 0 & is.finite(fit$ESS$lambda)]),
+    percent_problematic = 100 * mean(rhat_param > 1.1 | ess_param < 100),
+    n_comm_rhat_gt_1.1 = sum(rhat_comm > 1.1), max_comm_rhat = max(rhat_comm),
+    n_beta_rhat_gt_1.1 = sum(fit$rhat$beta > 1.1), n_beta = length(fit$rhat$beta), max_beta_rhat = max(fit$rhat$beta),
+    mean_geweke = if (is.null(fit$lambda.samples)) NA else mean(abs(coda::geweke.diag(coda::as.mcmc(fit$lambda.samples))$z), na.rm = TRUE),
+    waic = waic,
+    chain_medians = list(beta.comm = chain_medians(fit$beta.comm.samples), tau.sq.beta = chain_medians(fit$tau.sq.beta.samples), sigma.sq.psi = chain_medians(fit$sigma.sq.psi.samples))
+  )
+  # Goodness of fit (slow: posterior predictive replicates of every species x site); the log's Site_bayes_p / Rep_bayes_p are the means of the species p-values
+  if (gof) {
+    gof_tbl <- dplyr::bind_rows(lapply(run_ppc(fit), calc_bayes_p_ms))
+    out$gof_species <- gof_tbl
+    out$gof_mean <- tapply(gof_tbl$bayes_p, gof_tbl$group, mean)
+  }
+  if (!is.null(save_path)) {
+    saveRDS(out, save_path)
+    cat("Saved fit summary", save_path, "\n")
+  }
+  out
+}
+
 plot_parm_estimates <- function(parms_df, ms = FALSE){
   parms_df <- parms_df %>%
     mutate(UCL = estimate + 1.96 * std.error,

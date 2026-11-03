@@ -11,6 +11,7 @@ library(spOccupancy)
 # Pin functions that other attached packages mask (a plain assignment rather than conflicted, which turns every ambiguous call into an error)
 select <- dplyr::select
 filter <- dplyr::filter
+source("Scripts/spOcc_fns.R")
 
 # Configuration -----------------------------------------------------------
 ## Stacked list the temporal list is built from (one row per location x year-group x season)
@@ -59,7 +60,7 @@ fit_temporal <- function(data, occ.formula, tag, spatial = TRUE, mcmc = mcmc_ful
   # Latent occurrence starting values from the vignette: 1 where the species was detected in that site x period, else 0
   z.inits <- apply(data$y, c(1, 2, 3), function(a) as.numeric(sum(a, na.rm = TRUE) > 0))
   len <- if (smoke) list(n.batch = 10, n.burn = 0, n.thin = 1, n.chains = 1) else mcmc
-  save_path <- paste0("Derived/Rdata/Model_output/Temporal/Occ_mod_", dim(data$y)[1], "spp_1ecor_temporal_", tag, "_", Sys.Date(), ".rds")
+  save_path <- paste0("Derived/Rdata/Model_output/Temporal/Occ_mod_", dim(data$y)[1], "spp_", tag, "_", Sys.Date(), ".rds")
   if (!smoke && file.exists(save_path)) stop("'", save_path, "' already exists")
   # Create the output folder up front so a long fit never fails at the save step on a fresh machine
   dir.create(dirname(save_path), recursive = TRUE, showWarnings = FALSE)
@@ -71,7 +72,11 @@ fit_temporal <- function(data, occ.formula, tag, spatial = TRUE, mcmc = mcmc_ful
     tMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data[c("y", "occ.covs", "det.covs")], inits = list(z = z.inits), n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
   }
   cat("Finished", tag, format(Sys.time()), "| wall", format(Sys.time() - start), "\n")
-  if (!smoke) { saveRDS(mod, save_path); cat("SAVED", save_path, "\n") }
+  if (!smoke) {
+    saveRDS(mod, save_path); cat("SAVED", save_path, "\n")
+    # Small summary beside the fit for the model log, so a fit from another machine can be logged without copying it; an error here must not stop the sections still to run
+    tryCatch(summarize_fit(mod, sub("\\.rds$", "_summary.rds", save_path)), error = function(e) message("Fit summary failed: ", conditionMessage(e)))
+  }
   mod
 }
 
