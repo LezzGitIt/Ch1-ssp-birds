@@ -76,7 +76,12 @@ calc_bayes_p <- function(ppc_obj){
 # For multi_species objects
 calc_bayes_p_ms <- function(ppc_obj){
   tot.post <- ppc_obj$n.chains * ppc_obj$n.post
-  # Generate TF vector for each species (column) 
+  # Multi-species multi-season fits return the fit statistic as draws x species x period; sum it over periods so each species gets one Bayesian p-value, as for stacked fits (unsurveyed periods contribute 0 to both)
+  if (ppc_obj$class %in% c("tMsPGOcc", "stMsPGOcc", "svcTMsPGOcc")) {
+    ppc_obj$fit.y <- apply(ppc_obj$fit.y, c(1, 2), sum)
+    ppc_obj$fit.y.rep <- apply(ppc_obj$fit.y.rep, c(1, 2), sum)
+  }
+  # Generate TF vector for each species (column)
   bayes_p <- colSums(ppc_obj$fit.y.rep > ppc_obj$fit.y) / tot.post
   bayes_p <- round(bayes_p, 3)
   # Create tibble
