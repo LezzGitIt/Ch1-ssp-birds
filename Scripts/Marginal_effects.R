@@ -10,15 +10,13 @@ library(spOccupancy)
 
 # Configuration -----------------------------------------------------------
 # Stacked list the multi-season fits were built from (spOccupancy_temporal.R)
-msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds"
+msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_278_hab_fix.rds"
 
-## One figure per row: the fitted model, a short tag for the file name, and the focal variables. Either focal variable can be NA: no focal_cat gives one curve along focal_cont; no focal_cont gives a point + interval per level. Whether the two interact is decided by the loaded model's formula, not here.
-# Multi-season spatial models without Farm_join (model log rows 86, 88, 89): the primary Habitat x Tot_prec and the two alternative interactions
+## One figure per row: the fitted model, a short tag for the file name, and the focal variables. Either focal variable can be NA: no focal_cat gives one curve along focal_cont; no focal_cont gives a point + interval per level. Whether the two interact is decided by the loaded model's formula, not here. Every row must be fitted to the data list above
+# 278-species primary model (multi-season spatial, no Farm_join; Meta_gradient row 78); the 98-species rows 86, 88, 89 used msOcc_l_meta_98_hab_fix_jit1cm.rds
 plot_specs <- tribble(
-  ~model_tag,      ~Occ_mod_path,                                                                         ~focal_cont,   ~focal_cat,
-  "temporal_prec", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_prec_nofarm_long_2026-10-31.rds", "Tot_prec",    "Habitat",
-  "temporal_year", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_year_nofarm_long_2026-11-01.rds", "Year1",       "Habitat",
-  "temporal_dist", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_dist_nofarm_long_2026-11-01.rds", "Dist_forest", "Habitat"
+  ~model_tag,          ~Occ_mod_path,                                    ~focal_cont,   ~focal_cat,
+  "temporal_prec_278", "Derived/Rdata/Model_output/Temporal/278.rds", "Tot_prec",    "Habitat"
 )
 
 response <- "occupancy" # "occupancy" or "detection"

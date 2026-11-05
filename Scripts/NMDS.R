@@ -58,26 +58,39 @@ library(ggimage)
 library(magick)
 
 # Load data -----------------------------------------------------------------
-msOcc_l <- readRDS("Derived/Rdata/Model_input/msOcc_l_meta_99_ref.rds")
-#Occ_mod <- readRDS("Derived/Rdata/Model_output/Before_Oct_26/Occ_mod_99spp_1ecor_int_Dist_forest2026-05-06.rds")
+# Fitted model and the data list it was fitted to (stacked msOcc_l_* or multi-season tmsOcc_l_*); model_tag names the cache, so a different model never reads another model's ordinations
+Occ_mod_path <- "Derived/Rdata/Model_output/Temporal/278.rds"
+data_l_path <- "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_278_hab_fix.rds"
+model_tag <- "temporal_prec_278"
+Occ_mod <- readRDS(Occ_mod_path)
+data_l <- readRDS(data_l_path)
 
 # Build per-draw community matrices ------------------------------------------
-# This data is already Meta-department-only (Department == "Meta" for every row); just exclude Mosaic
-site_idx <- which(msOcc_l$occ.covs$Habitat != "Mosaic")
-site_meta <- msOcc_l$occ.covs[site_idx, c("Id_survey", "Habitat")]
-# Translate to English for the figure - recoded here (not just in the legend labels) so every
-# downstream Habitat-grouped object (ellipses, species_candidates, etc.) already carries the
-# English term, with nothing left keyed to the Spanish original.
-site_meta$Habitat <- recode(site_meta$Habitat, Pastizales = "Pasture", Ssp = "Silvopasture", Bosque = "Forest")
-
 # K draws evenly spaced across the posterior, rather than random, for even coverage
 draw_idx <- round(seq(1, dim(Occ_mod$z.samples)[1], length.out = K))
-z_draws <- Occ_mod$z.samples[draw_idx, , site_idx, drop = FALSE] # K x species x sites
+# One community (row) per surveyed location x period, as in the stacked fits; a multi-season fit's z is draws x species x location x period and also holds draws for unsurveyed periods (no data there), which are dropped
+if (length(dim(Occ_mod$z.samples)) == 4) {
+  n_loc <- dim(data_l$y)[2]
+  surveyed <- which(apply(!is.na(data_l$y[1, , , , drop = FALSE]), c(2, 3), any), arr.ind = TRUE)
+  site_meta <- tibble(Id_survey = dimnames(data_l$y)[[2]][surveyed[, 1]], Period = dimnames(data_l$y)[[3]][surveyed[, 2]], Habitat = data_l$occ.covs$Habitat[surveyed[, 1]])
+  z_draws <- Occ_mod$z.samples[draw_idx, , , , drop = FALSE]
+  dim(z_draws) <- c(length(draw_idx), dim(z_draws)[2], prod(dim(z_draws)[3:4]))
+  z_draws <- z_draws[, , (surveyed[, 2] - 1) * n_loc + surveyed[, 1], drop = FALSE]
+} else {
+  site_meta <- data_l$occ.covs[, c("Id_survey", "Habitat")]
+  z_draws <- Occ_mod$z.samples[draw_idx, , , drop = FALSE]
+}
+# This data is already Meta-department-only (Department == "Meta" for every row); just exclude Mosaic
+site_idx <- which(site_meta$Habitat != "Mosaic")
+site_meta <- site_meta[site_idx, ]
+z_draws <- z_draws[, , site_idx, drop = FALSE] # K x species x sites
+# Translate to English for the figure - recoded here (not just in the legend labels) so every downstream Habitat-grouped object (ellipses, species_candidates, etc.) already carries the English term, with nothing left keyed to the Spanish original.
+site_meta$Habitat <- recode(site_meta$Habitat, Pastizales = "Pasture", Ssp = "Silvopasture", Bosque = "Forest")
 
-# Every site has >= 1 species present in every individual draw, and every species is present
-# at least once somewhere across the K draws (checked directly against this model/data) - so
-# no rows or columns need to be dropped, and every draw's matrix has the same 460 x 99 shape,
-# which is what makes the Procrustes alignment below valid (same points, same order, every time).
+# Every draw's matrix has the same sites x species shape, in the same order, which is what makes the Procrustes alignment below valid. A site with no species in a draw (a valid posterior state, e.g. a pasture survey with no detections) is at Bray-Curtis 1 from every other site, but two empty sites in one draw give an undefined 0/0 distance
+empty_sites <- apply(z_draws, c(1, 3), sum) == 0
+if (any(rowSums(empty_sites) > 1)) stop("A draw has two or more sites with no species present, so their Bray-Curtis distance is undefined")
+if (any(empty_sites)) message(sum(empty_sites), " site x draw combinations have no species present (Bray-Curtis 1 to every other site)")
 draw_comm <- function(i) {
   mat <- t(z_draws[i, , ])
   colnames(mat) <- Occ_mod$sp.names
@@ -110,7 +123,7 @@ fit_nmds <- function(mat) {
   metaMDS(mat, k = nmds_k, distance = "bray", autotransform = FALSE, try = try_n, trymax = trymax_n, trace = 0)
 }
 
-nmds_cache <- paste0("Derived/Rdata/nmds/nmds_habitat_posterior_K", K, "_dim", nmds_k, "_distavg.rds")
+nmds_cache <- paste0("Derived/Rdata/nmds/nmds_habitat_", model_tag, "_posterior_K", K, "_dim", nmds_k, "_distavg.rds")
 if (file.exists(nmds_cache)) {
   cached <- readRDS(nmds_cache)
 } else {
@@ -480,11 +493,7 @@ nmds_plot <- ggplot() +
 # Filename tracks show_species_labels so the cluttered and clean versions don't overwrite each other.
 # 16:9 aspect (widescreen PowerPoint slide) rather than the previous ~16:13 - wider canvas at the
 # same height, so the figure fills more of the slide instead of leaving side margins once placed.
-output_file <- if (show_species_labels) {
-  "Figures/nmds_habitat_posterior.png"
-} else {
-  "Figures/nmds_habitat_posterior_no_text.png"
-}
+output_file <- paste0("Figures/nmds_habitat_", model_tag, "_posterior", if (show_species_labels) "" else "_no_text", ".png")
 ggsave(output_file, nmds_plot, bg = "white", width = 20, height = 11.25)
 
 # The 20x11.25 canvas above is sized generously so margin-space photos never get cut off, which
