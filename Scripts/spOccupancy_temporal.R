@@ -3,7 +3,7 @@
 # Model family: Bernoulli occupancy and Bernoulli detection with logit links (Polya-Gamma sampler); spatial NNGP exponential process with 6 latent factors; no AR(1) temporal effect (periods are unequally spaced 2013-2026), the trend is carried by the Year1 fixed effect as in the stacked model
 # Non-spatial comparison (spOccupancy::tMsPGOcc): same likelihood and links, no spatial process and no latent factors (tMsPGOcc has neither); periods at a location are linked only through an unstructured location random effect, as in the vignette's tPGOcc example
 # svcTMsPGOcc with svc.cols = 1 is the same model as stMsPGOcc (seeded runs give bit-identical draws, 2026-11-02) but, unlike stMsPGOcc, accepts range.ind (species x location, so clipping is spatial, not seasonal); tMsPGOcc has no range.ind, so the non-spatial fits are unclipped
-# Run headless with: nohup caffeinate -is Rscript Scripts/spOccupancy_temporal.R <section(s)> > <log> 2>&1 &  (sections: additive, prec, prec_nofarm, prec_nofarm_long, prec_ns, prec_ns_loc, year_nofarm_long, dist_nofarm_long; or smoke for a 10-batch, 1-chain dimension check)
+# Run headless with: nohup caffeinate -is Rscript Scripts/spOccupancy_temporal.R <section(s)> > <log> 2>&1 &  (sections: additive, prec, prec_nofarm, prec_nofarm_long, prec_ns, prec_ns_loc, year_nofarm_long, dist_nofarm_long, prec_nofarm_long_f2; or smoke for a 10-batch, 1-chain dimension check)
 
 # Load libraries ----------------------------------------------------------
 library(tidyverse)
@@ -56,7 +56,7 @@ ar1 <- FALSE
 
 # Functions ---------------------------------------------------------------
 # Fit one multi-season model and save it under a tag; each call is independent so a crashed or cached fit never affects another
-fit_temporal <- function(data, occ.formula, tag, spatial = TRUE, mcmc = mcmc_full, smoke = FALSE) {
+fit_temporal <- function(data, occ.formula, tag, spatial = TRUE, mcmc = mcmc_full, n_factors = n.factors, smoke = FALSE) {
   # Latent occurrence starting values from the vignette: 1 where the species was detected in that site x period, else 0
   z.inits <- apply(data$y, c(1, 2, 3), function(a) as.numeric(sum(a, na.rm = TRUE) > 0))
   len <- if (smoke) list(n.batch = 10, n.burn = 0, n.thin = 1, n.chains = 1) else mcmc
@@ -67,7 +67,7 @@ fit_temporal <- function(data, occ.formula, tag, spatial = TRUE, mcmc = mcmc_ful
   cat("Started", tag, format(Sys.time()), "\n")
   start <- Sys.time()
   mod <- if (spatial) {
-    svcTMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data, inits = list(z = z.inits), priors = priors, tuning = list(phi = 2), svc.cols = 1, cov.model = "exponential", NNGP = TRUE, n.neighbors = n.neighbors, n.factors = n.factors, n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
+    svcTMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data, inits = list(z = z.inits), priors = priors, tuning = list(phi = 2), svc.cols = 1, cov.model = "exponential", NNGP = TRUE, n.neighbors = n.neighbors, n.factors = n_factors, n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
   } else {
     tMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data[c("y", "occ.covs", "det.covs")], inits = list(z = z.inits), n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
   }
@@ -177,3 +177,7 @@ if ("year_nofarm_long" %in% run_sections) Occ_mod_year_nofarm_long <- fit_tempor
 
 # Habitat x Dist_forest, spatial, no Farm_join, long run ------------------
 if ("dist_nofarm_long" %in% run_sections) Occ_mod_dist_nofarm_long <- fit_temporal(tmsOcc_l, occ_formulas$dist_nofarm, "dist_nofarm_long", mcmc = mcmc_long)
+
+# Primary model with 2 spatial factors, long run ---------------------------
+# At 278 species only factor 1 has species loadings whose CrI excludes 0 (factors 2-6: none), and the anchor species of factors 2 and 3 (Manacus, Milvago) have the only species Rhats > 1.1, so this checks whether fewer factors mix better and leave the habitat estimates unchanged
+if ("prec_nofarm_long_f2" %in% run_sections) Occ_mod_prec_nofarm_long_f2 <- fit_temporal(tmsOcc_l, occ_formulas$prec_nofarm, "prec_nofarm_long_f2", mcmc = mcmc_long, n_factors = 2)
