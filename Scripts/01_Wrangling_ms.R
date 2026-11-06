@@ -158,9 +158,9 @@ Ft_abu <- Bird_pcs_analysis3 %>%
   count(Species_ayerbe, sort = T) %>% 
   left_join(Ft)
 
-## Set minimum number of distinct point count locations which in turn sets the number of species
-Num_locs_cutoff <- 1 # Gradient, all species (i = 10), 2026-10-23 data: 5 = 162, 13 = 111, 17 = 102, 18 = 101, 19 = 99, 20 = 97 species
-Ft_abu2 <- Ft_abu %>% mutate(In_out = if_else(n >= Num_locs_cutoff, "In", "Out"))
+## Set minimum number of point-count visits with a detection (rows of Bird_pcs_analysis, one per species x visit), which in turn sets the number of species
+Num_detect_cutoff <- 1 # Gradient, all species (i = 10), 2026-10-23 data: 5 = 162, 13 = 111, 17 = 102, 18 = 101, 19 = 99, 20 = 97 species
+Ft_abu2 <- Ft_abu %>% mutate(In_out = if_else(n >= Num_detect_cutoff, "In", "Out"))
 Ft_abu3 <- Ft_abu2 %>% filter(In_out == "In")
 
 if(Spp_subset_i == "Forest"){

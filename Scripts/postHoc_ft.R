@@ -8,12 +8,16 @@ library(tidyverse)
 library(posterior)
 library(spOccupancy)
 library(ggdist)
+ggplot2::theme_set(cowplot::theme_cowplot())
+# postHocLM samples its posterior, so a fixed seed keeps the saved summary reproducible
+set.seed(20261105)
 
 ## Ch1 trait table built in the sibling Fd-pd repo (01_Ch1_traits.R): the deposit traits plus eye size, BirdLife clutch, nest and incubation traits
 Ft <- read_csv("../Fd-pd/Derived/Functional_traits_ch1.csv")
 
 # Occupancy model output
-Occ_mod <- readRDS("Derived/Rdata/Model_output/Before_Oct_26/Occ_mod_99spp_1ecor_ref_2026-05-06.rds")
+Occ_mod_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_prec_nofarm_long_2026-10-31.rds"
+Occ_mod <- readRDS(Occ_mod_path)
 
 # Forest or non-forest? ---------------------------------------------------
 Forest <- FALSE
@@ -26,7 +30,7 @@ if(Forest){
 # Format ------------------------------------------------------------------
 # Rows correspond to the posterior MCMC samples and the columns correspond to species
 y_draws <- as_draws_df(Occ_mod$beta.samples) %>% 
-  select(starts_with(variable_posthoc)) %>% 
+  select(starts_with(paste0(variable_posthoc, "-"))) %>% 
   rename_with(~str_remove(., paste0(variable_posthoc, "-")))
 
 # >PCA --------------------------------------------------------------------
@@ -225,6 +229,23 @@ format.for.plotting(postHoc_nest_exp$beta.samples) %>% plot_half_eye(y_var = par
 # Clutch size
 format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_clutch)
 
+# Save summary ------------------------------------------------------------
+# One row per trait-model coefficient (posterior mean, 95% CrI, P(>0)) with the number of species and the median Bayesian R2, read by the progress report; the file name carries the occupancy fit's name so a summary is never attributed to another fit
+postHoc_fits <- list(Morphology = postHoc_morph, Eye_size = postHoc_eye, Life_history = postHoc_lh, Specialization = postHoc_specialization, Clutch_size = postHoc_clutch, Nest_location = postHoc_nesting, Nest_exposure = postHoc_nest_exp)
+postHoc_data <- list(Morphology = postHoc_l_morph, Eye_size = postHoc_l_eye, Life_history = postHoc_l_lh, Specialization = postHoc_l_lh, Clutch_size = postHoc_l_clutch, Nest_location = postHoc_l_nesting, Nest_exposure = postHoc_l_nest_exp)
+# postHocLM pairs trait rows with occupancy-draw columns by position, so the species must match in the same order
+iwalk(postHoc_data, \(d, nm) if (!identical(str_replace(as.character(d$covs$Species_ayerbe), " ", "_"), colnames(d$y))) stop(nm, ": trait-table species do not match the occupancy-draw columns"))
+postHoc_summary <- imap(postHoc_fits, \(fit, nm) {
+  b <- as.matrix(fit$beta.samples)
+  # Trait = the trait-table column each coefficient comes from (a categorical trait gives one coefficient per non-reference level)
+  traits <- setdiff(names(postHoc_data[[nm]]$covs), "Species_ayerbe")
+  trait_of <- map_chr(colnames(b), \(term) { hits <- traits[startsWith(term, traits)]; if (length(hits) == 0) NA_character_ else hits[which.max(nchar(hits))] })
+  tibble(Model = nm, Trait = trait_of, Term = colnames(b), Mean = colMeans(b), Lower = apply(b, 2, quantile, 0.025), Upper = apply(b, 2, quantile, 0.975), P_positive = colMeans(b > 0), N_species = nrow(postHoc_data[[nm]]$covs), Bayes_R2 = median(as.numeric(fit$bayes.R2)))
+}) %>%
+  list_rbind() %>%
+  mutate(across(c(Mean, Lower, Upper, P_positive, Bayes_R2), \(x) round(x, 3)))
+write_csv(postHoc_summary, paste0("Derived/Excels/postHoc_", variable_posthoc, "_", sub("\\.rds$", "", basename(Occ_mod_path)), ".csv"))
+
 # Inspect Threatened species ------------------------------------------------------
 tibble(Species_ayerbe = str_replace(names(y_draws), "_", " "), 
        Response = colMeans(y_draws)) %>% 
@@ -240,15 +261,21 @@ Spp_te <- Ft %>%
   filter(Species_ayerbe_ %in% Occ_mod$sp.names) %>% 
   select(Species_ayerbe_, Iucn_red_list)
 
-# Plot
+# Sample sizes of T&E species: the number of point-count visits (replicates) with a detection, the same count the species-inclusion cutoff uses (Num_detect_cutoff in 01_Wrangling_ms.R)
+N_det <- apply(Occ_mod$y, 1, sum, na.rm = TRUE)
+N_det_te <- tibble(Species_ayerbe = Spp_te$Species_ayerbe_, N = N_det[Spp_te$Species_ayerbe_])
+arrange(N_det_te, N)
+
+# Plot, with each species' N to the right of the panel
 as_draws_df(Occ_mod$beta.samples) %>% 
-  select(starts_with(variable_posthoc)) %>% 
+  select(starts_with(paste0(variable_posthoc, "-"))) %>% 
   rename_with(~str_remove(., paste0(variable_posthoc, "-"))) %>%
   select(Spp_te$Species_ayerbe_) %>%
   pivot_longer(cols = everything(), 
                names_to = "Species_ayerbe", 
                values_to = "value") %>%
-  plot_half_eye(y_var = Species_ayerbe, Intercept = NA)
-
-# Examine sample sizes of T&E species
-sort(obs_occ[Spp_te$Species_ayerbe_])
+  plot_half_eye(y_var = Species_ayerbe, Intercept = NA) +
+  geom_text(data = N_det_te, aes(x = Inf, y = Species_ayerbe, label = paste("N =", N)), inherit.aes = FALSE, hjust = -0.1, vjust = -0.5, size = 3.5) +
+  coord_cartesian(clip = "off") +
+  labs(caption = "N = point-count visits with a detection") +
+  theme(plot.margin = margin(5.5, 50, 5.5, 5.5))
