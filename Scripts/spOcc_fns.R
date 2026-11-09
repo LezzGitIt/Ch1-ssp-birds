@@ -183,6 +183,39 @@ summarize_fit <- function(fit, save_path = NULL, gof = FALSE){
   out
 }
 
+## Multi-season fitting
+# Fill the unsurveyed cells (NA) of a site x period covariate matrix with the location's value from its nearest surveyed period, ties going to the earlier period
+fill_nearest_period <- function(m) {
+  t(apply(m, 1, function(r) { obs <- which(!is.na(r)); r[sapply(seq_along(r), function(t) obs[which.min(abs(obs - t))])] }))
+}
+
+# Fit one multi-season multi-species occupancy model (spOccupancy::svcTMsPGOcc with a spatially varying intercept only, or spOccupancy::tMsPGOcc when spatial = FALSE) and save it with a fit summary beside it; each call is independent, so a crashed or cached fit never affects another
+# settings: list with det.formula, priors, n.neighbors, n.factors, batch.length, ar1, mcmc (list of n.batch, n.burn, n.thin, n.chains), out_dir and optionally seed; mcmc, n_factors and seed override the settings for one call; seed is passed to set.seed() before sampling (NULL leaves the random state alone); inits is a list of extra starting values added to the z starting values, e.g. list(lambda = list(<species x factor matrix>)) to start the loadings from an earlier fit (spOccupancy uses the same loadings start in every chain, and redraws the other parameters' starts for chains 2+)
+fit_temporal <- function(data, occ.formula, tag, settings, mcmc = settings$mcmc, n_factors = settings$n.factors, seed = settings$seed, inits = NULL, spatial = TRUE, smoke = FALSE) {
+  # Latent occurrence starting values from the vignette: 1 where the species was detected in that site x period, else 0
+  z.inits <- apply(data$y, c(1, 2, 3), function(a) as.numeric(sum(a, na.rm = TRUE) > 0))
+  len <- if (smoke) list(n.batch = 10, n.burn = 0, n.thin = 1, n.chains = 1) else mcmc
+  save_path <- file.path(settings$out_dir, paste0("Occ_mod_", dim(data$y)[1], "spp_", tag, "_", Sys.Date(), ".rds"))
+  if (!smoke && file.exists(save_path)) stop("'", save_path, "' already exists")
+  # Create the output folder up front so a long fit never fails at the save step on a fresh machine
+  dir.create(dirname(save_path), recursive = TRUE, showWarnings = FALSE)
+  cat("Started", tag, format(Sys.time()), if (!is.null(seed)) paste("| seed", seed), if (length(inits)) paste("| inits:", paste(names(inits), collapse = ", ")), "\n")
+  start <- Sys.time()
+  if (!is.null(seed)) set.seed(seed)
+  mod <- if (spatial) {
+    spOccupancy::svcTMsPGOcc(occ.formula = occ.formula, det.formula = settings$det.formula, data = data, inits = c(list(z = z.inits), inits), priors = settings$priors, tuning = list(phi = 2), svc.cols = 1, cov.model = "exponential", NNGP = TRUE, n.neighbors = settings$n.neighbors, n.factors = n_factors, n.batch = len$n.batch, batch.length = settings$batch.length, accept.rate = 0.43, ar1 = settings$ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
+  } else {
+    spOccupancy::tMsPGOcc(occ.formula = occ.formula, det.formula = settings$det.formula, data = data[c("y", "occ.covs", "det.covs")], inits = c(list(z = z.inits), inits), n.batch = len$n.batch, batch.length = settings$batch.length, accept.rate = 0.43, ar1 = settings$ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
+  }
+  cat("Finished", tag, format(Sys.time()), "| wall", format(Sys.time() - start), "\n")
+  if (!smoke) {
+    saveRDS(mod, save_path); cat("SAVED", save_path, "\n")
+    # Small summary beside the fit for the model log, so a fit from another machine can be logged without copying it; an error here must not stop the sections still to run
+    tryCatch(summarize_fit(mod, sub("\\.rds$", "_summary.rds", save_path)), error = function(e) message("Fit summary failed: ", conditionMessage(e)))
+  }
+  mod
+}
+
 plot_parm_estimates <- function(parms_df, ms = FALSE){
   parms_df <- parms_df %>%
     mutate(UCL = estimate + 1.96 * std.error,

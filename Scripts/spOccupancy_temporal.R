@@ -53,32 +53,9 @@ mcmc_long <- list(n.batch = 2400, n.burn = 30000, n.thin = 75, n.chains = 3)
 n.factors <- 6; n.neighbors <- 5
 priors <- list(phi.unif = list(3 / 25e3, 3 / 23e3)) # effective spatial range 23-25 km, as in the stacked fits
 ar1 <- FALSE
-
-# Functions ---------------------------------------------------------------
-# Fit one multi-season model and save it under a tag; each call is independent so a crashed or cached fit never affects another
-fit_temporal <- function(data, occ.formula, tag, spatial = TRUE, mcmc = mcmc_full, n_factors = n.factors, smoke = FALSE) {
-  # Latent occurrence starting values from the vignette: 1 where the species was detected in that site x period, else 0
-  z.inits <- apply(data$y, c(1, 2, 3), function(a) as.numeric(sum(a, na.rm = TRUE) > 0))
-  len <- if (smoke) list(n.batch = 10, n.burn = 0, n.thin = 1, n.chains = 1) else mcmc
-  save_path <- paste0("Derived/Rdata/Model_output/Temporal/Occ_mod_", dim(data$y)[1], "spp_", tag, "_", Sys.Date(), ".rds")
-  if (!smoke && file.exists(save_path)) stop("'", save_path, "' already exists")
-  # Create the output folder up front so a long fit never fails at the save step on a fresh machine
-  dir.create(dirname(save_path), recursive = TRUE, showWarnings = FALSE)
-  cat("Started", tag, format(Sys.time()), "\n")
-  start <- Sys.time()
-  mod <- if (spatial) {
-    svcTMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data, inits = list(z = z.inits), priors = priors, tuning = list(phi = 2), svc.cols = 1, cov.model = "exponential", NNGP = TRUE, n.neighbors = n.neighbors, n.factors = n_factors, n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
-  } else {
-    tMsPGOcc(occ.formula = occ.formula, det.formula = det.formula, data = data[c("y", "occ.covs", "det.covs")], inits = list(z = z.inits), n.batch = len$n.batch, batch.length = batch.length, accept.rate = 0.43, ar1 = ar1, n.omp.threads = 1, verbose = TRUE, n.report = 100, n.burn = len$n.burn, n.thin = len$n.thin, n.chains = len$n.chains)
-  }
-  cat("Finished", tag, format(Sys.time()), "| wall", format(Sys.time() - start), "\n")
-  if (!smoke) {
-    saveRDS(mod, save_path); cat("SAVED", save_path, "\n")
-    # Small summary beside the fit for the model log, so a fit from another machine can be logged without copying it; an error here must not stop the sections still to run
-    tryCatch(summarize_fit(mod, sub("\\.rds$", "_summary.rds", save_path)), error = function(e) message("Fit summary failed: ", conditionMessage(e)))
-  }
-  mod
-}
+## Settings passed to fit_temporal() (spOcc_fns.R); a section overrides mcmc, n_factors or seed in its own call
+# Every fit is seeded so a rerun reproduces its draws exactly (fits up to Multi_spp_100 row 94 were unseeded); the same seed as the scale-of-effect fits
+fit_settings <- list(det.formula = det.formula, priors = priors, n.neighbors = n.neighbors, n.factors = n.factors, batch.length = batch.length, ar1 = ar1, mcmc = mcmc_full, out_dir = "Derived/Rdata/Model_output/Temporal", seed = 20261107)
 
 # Build the temporal list -------------------------------------------------
 # Reshape the stacked list (rows = site x time) into the multi-season format of the vignette's hbefTrends data: y is species x site x time x replicate, site-constant occupancy covariates are site vectors, time-varying ones are site x time matrices, detection covariates are site x time x replicate arrays, and coords has one row per site; built once, then read from disk
@@ -108,7 +85,7 @@ if (file.exists(tmsOcc_l_path)) {
       m <- matrix(NA_real_, n_site, n_time, dimnames = list(Site_levels, Time_levels))
       m[cbind(site_i, time_i)] <- v
       if (nm %in% Period_covs) return(matrix(colMeans(m, na.rm = TRUE), n_site, n_time, byrow = TRUE, dimnames = dimnames(m)))
-      t(apply(m, 1, function(r) { obs <- which(!is.na(r)); r[sapply(seq_along(r), function(t) obs[which.min(abs(obs - t))])] }))
+      fill_nearest_period(m)
     }) %>% compact()
   ## Detection covariates: stacked row x replicate tables -> site x time x replicate arrays, kept only where the survey happened; Y/N text coded 1/0 because arrays must be numeric, and covariates with no values at all (Pc_duration: constant 10 min, so scaling gave NaN) are dropped
   det_covs <- msOcc_l$det.covs %>% keep(~ !all(is.na(as.matrix(.x)))) %>%
@@ -147,37 +124,37 @@ str(tmsOcc_l, max.level = 2)
 
 # Smoke test --------------------------------------------------------------
 # Catches formula / dimension errors in about a minute; not for judging convergence
-if ("smoke" %in% run_sections) smoke_mod <- fit_temporal(tmsOcc_l, occ_formulas$prec, "smoke", smoke = TRUE)
+if ("smoke" %in% run_sections) smoke_mod <- fit_temporal(tmsOcc_l, occ_formulas$prec, "smoke", settings = fit_settings, smoke = TRUE)
 
 # Additive ----------------------------------------------------------------
 # Same formula and data as the converged stacked fit D (Occ_mod_98spp_1ecor_add_ssp_habfix_bfcoords_2026-10-30.rds), so WAIC and estimates compare directly
-if ("additive" %in% run_sections) Occ_mod_add <- fit_temporal(tmsOcc_l, occ_formulas$additive, "add")
+if ("additive" %in% run_sections) Occ_mod_add <- fit_temporal(tmsOcc_l, occ_formulas$additive, "add", settings = fit_settings)
 
 # Habitat x Tot_prec ------------------------------------------------------
 # Primary formula; the stacked version mixed poorly at full length (model log row 70)
-if ("prec" %in% run_sections) Occ_mod_prec <- fit_temporal(tmsOcc_l, occ_formulas$prec, "prec")
+if ("prec" %in% run_sections) Occ_mod_prec <- fit_temporal(tmsOcc_l, occ_formulas$prec, "prec", settings = fit_settings)
 
 # Habitat x Tot_prec, spatial, no Farm_join ------------------------------
 # Tests whether dropping the farm effect lets the spatial model mix (as it did for the stacked grid.index fit, model log row 78)
-if ("prec_nofarm" %in% run_sections) Occ_mod_prec_nofarm <- fit_temporal(tmsOcc_l, occ_formulas$prec_nofarm, "prec_nofarm")
+if ("prec_nofarm" %in% run_sections) Occ_mod_prec_nofarm <- fit_temporal(tmsOcc_l, occ_formulas$prec_nofarm, "prec_nofarm", settings = fit_settings)
 
 # Habitat x Tot_prec, non-spatial, Farm_join + location ---------------------
 # The other half of the test: farm effect kept, spatial process replaced by an unstructured location effect
-if ("prec_ns" %in% run_sections) Occ_mod_prec_ns <- fit_temporal(tmsOcc_l, occ_formulas$prec_ns, "prec_ns", spatial = FALSE)
+if ("prec_ns" %in% run_sections) Occ_mod_prec_ns <- fit_temporal(tmsOcc_l, occ_formulas$prec_ns, "prec_ns", settings = fit_settings, spatial = FALSE)
 
 # Habitat x Tot_prec, spatial, no Farm_join, long run ---------------------
 # Same model as prec_nofarm at twice the post-burn-in length, to see whether Tot_prec (Rhat 1.14, model log row 83) converges with more samples
-if ("prec_nofarm_long" %in% run_sections) Occ_mod_prec_nofarm_long <- fit_temporal(tmsOcc_l, occ_formulas$prec_nofarm, "prec_nofarm_long", mcmc = mcmc_long)
+if ("prec_nofarm_long" %in% run_sections) Occ_mod_prec_nofarm_long <- fit_temporal(tmsOcc_l, occ_formulas$prec_nofarm, "prec_nofarm_long", settings = fit_settings, mcmc = mcmc_long)
 
 # Habitat x Tot_prec, non-spatial, location only --------------------------
-if ("prec_ns_loc" %in% run_sections) Occ_mod_prec_ns_loc <- fit_temporal(tmsOcc_l, occ_formulas$prec_ns_loc, "prec_ns_loc", spatial = FALSE)
+if ("prec_ns_loc" %in% run_sections) Occ_mod_prec_ns_loc <- fit_temporal(tmsOcc_l, occ_formulas$prec_ns_loc, "prec_ns_loc", settings = fit_settings, spatial = FALSE)
 
 # Habitat x Year1, spatial, no Farm_join, long run ------------------------
-if ("year_nofarm_long" %in% run_sections) Occ_mod_year_nofarm_long <- fit_temporal(tmsOcc_l, occ_formulas$year_nofarm, "year_nofarm_long", mcmc = mcmc_long)
+if ("year_nofarm_long" %in% run_sections) Occ_mod_year_nofarm_long <- fit_temporal(tmsOcc_l, occ_formulas$year_nofarm, "year_nofarm_long", settings = fit_settings, mcmc = mcmc_long)
 
 # Habitat x Dist_forest, spatial, no Farm_join, long run ------------------
-if ("dist_nofarm_long" %in% run_sections) Occ_mod_dist_nofarm_long <- fit_temporal(tmsOcc_l, occ_formulas$dist_nofarm, "dist_nofarm_long", mcmc = mcmc_long)
+if ("dist_nofarm_long" %in% run_sections) Occ_mod_dist_nofarm_long <- fit_temporal(tmsOcc_l, occ_formulas$dist_nofarm, "dist_nofarm_long", settings = fit_settings, mcmc = mcmc_long)
 
 # Primary model with 2 spatial factors, long run ---------------------------
 # At 278 species only factor 1 has species loadings whose CrI excludes 0 (factors 2-6: none), and the anchor species of factors 2 and 3 (Manacus, Milvago) have the only species Rhats > 1.1, so this checks whether fewer factors mix better and leave the habitat estimates unchanged
-if ("prec_nofarm_long_f2" %in% run_sections) Occ_mod_prec_nofarm_long_f2 <- fit_temporal(tmsOcc_l, occ_formulas$prec_nofarm, "prec_nofarm_long_f2", mcmc = mcmc_long, n_factors = 2)
+if ("prec_nofarm_long_f2" %in% run_sections) Occ_mod_prec_nofarm_long_f2 <- fit_temporal(tmsOcc_l, occ_formulas$prec_nofarm, "prec_nofarm_long_f2", settings = fit_settings, mcmc = mcmc_long, n_factors = 2)

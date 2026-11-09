@@ -28,7 +28,7 @@ Run from the repository root (open `Ch1-ssp-birds.Rproj`). Survey tables, point 
 | `Scripts/spOccupancy_ms.R` | Fits the stacked multi-species occupancy models (one row per location × survey period) and runs diagnostics |
 | `Scripts/spOccupancy_temporal.R` | Reshapes the stacked data list into the multi-season format (one site per location, year-group × season periods) and fits the multi-season spatial occupancy model (`svcTMsPGOcc` with a spatially varying intercept only, equivalent to `stMsPGOcc` but with range clipping) and its non-spatial counterpart (`tMsPGOcc`, location random effect); holds the primary model |
 | `Scripts/postHoc_ft.R`, `Scripts/NMDS.R`, `Scripts/Marginal_effects.R`, `Scripts/Plotting.R` | Trait analysis, community composition, marginal effects and the sampling map |
-| `Scripts/spOcc_fns.R` | Shared functions, sourced by the scripts above |
+| `Scripts/spOcc_fns.R` | Shared functions, sourced by the scripts above, including `fit_temporal()`, which fits and saves one multi-season model |
 | `Scripts/DAGs.R`, `Scripts/qmd/Math.qmd` | Causal diagrams and model notation |
 
 Data lists and fitted models are saved under `Derived/Rdata/`, split by data structure: `Model_input/Stacked/` and `Model_input/Temporal/` (data lists), `Model_output/Stacked/` and `Model_output/Temporal/` (fits).
