@@ -27,7 +27,7 @@ Run from the repository root (open `Ch1-ssp-birds.Rproj`). Survey tables, point 
 | `Scripts/Correlation_vis.R` | Screens candidate predictors for collinearity |
 | `Scripts/spOccupancy_ms.R` | Fits the stacked multi-species occupancy models (one row per location × survey period) and runs diagnostics |
 | `Scripts/spOccupancy_temporal.R` | Reshapes the stacked data list into the multi-season format (one site per location, year-group × season periods) and fits the multi-season spatial occupancy model (`svcTMsPGOcc` with a spatially varying intercept only, equivalent to `stMsPGOcc` but with range clipping) and its non-spatial counterpart (`tMsPGOcc`, location random effect); holds the primary model |
-| `Scripts/postHoc_ft.R`, `Scripts/NMDS.R`, `Scripts/Marginal_effects.R`, `Scripts/Plotting.R` | Trait analysis, community composition, marginal effects and the sampling map |
+| `Scripts/postHoc_ft.R`, `Scripts/NMDS.R`, `Scripts/Marginal_effects.R`, `Scripts/Plotting.R` | Trait analysis (summary saved to `Derived/Excels/postHoc_<response>_<fit>.csv`), community composition (figures in `Figures/NMDS_meta/`; species counted inside each habitat ellipse saved to `Derived/Excels/nmds_ellipse_counts_<model_tag>.csv`), marginal effects and the sampling map |
 | `Scripts/spOcc_fns.R` | Shared functions, sourced by the scripts above, including `fit_temporal()`, which fits and saves one multi-season model |
 | `Scripts/DAGs.R`, `Scripts/qmd/Math.qmd` | Causal diagrams and model notation |
 

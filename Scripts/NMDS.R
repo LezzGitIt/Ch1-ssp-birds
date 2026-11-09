@@ -372,6 +372,28 @@ mean_ellipses <- pmap(mean_ellipse_fit, function(Habitat, center, cov, scale) {
     mutate(Habitat = Habitat)
 }) %>% list_rbind()
 
+# Species inside each habitat ellipse ----------------------------------------
+# A visual guide to how species spread through NMDS space, not a classification: a species is inside an ellipse when its squared Mahalanobis distance from the ellipse's centre is at most the ellipse's scale squared (the radius veganCovEllipse() draws), on NMDS1-2 as plotted
+## Name each point's set of ellipses ("Silvopasture + Forest"), or "None"; fits is a list of center / cov / scale named by Habitat
+ellipse_class <- function(points, fits) {
+  inside <- map(fits[names(habitat_colors)], \(g) mahalanobis(points, g$center, g$cov) <= g$scale^2)
+  pmap_chr(inside, \(...) { r <- c(...); if (any(r)) paste(names(habitat_colors)[r], collapse = " + ") else "None" })
+}
+## As plotted: mean species positions against the bold ellipses
+mean_fits <- set_names(pmap(select(mean_ellipse_fit, center, cov, scale), list), mean_ellipse_fit$Habitat)
+species_scores$Ellipse_class <- ellipse_class(as.matrix(species_scores[, c("NMDS1", "NMDS2")]), mean_fits)
+## Per draw: each draw's species scores against that draw's own ellipses, for the posterior spread of the counts
+draw_class_counts <- imap(aligned, \(a, i) tibble(Class = ellipse_class(a$species[, 1:2], set_names(draw_ellipse_fit[paste(names(habitat_colors), i, sep = "_")], names(habitat_colors)))) %>% count(Class)) %>%
+  list_rbind(names_to = "draw") %>%
+  complete(draw, Class, fill = list(n = 0))
+ellipse_counts <- count(species_scores, Class = Ellipse_class, name = "As_plotted") %>%
+  full_join(summarise(draw_class_counts, Draw_median = median(n), Draw_lower = quantile(n, 0.025), Draw_upper = quantile(n, 0.975), .by = Class), by = "Class") %>%
+  mutate(As_plotted = replace_na(As_plotted, 0L)) %>%
+  arrange(desc(As_plotted), Class)
+write_csv(ellipse_counts, paste0("Derived/Excels/nmds_ellipse_counts_", model_tag, ".csv"))
+cat("\nSpecies inside each habitat ellipse (", if (is.null(ellipse_level)) "1 SD" else paste0(100 * ellipse_level, "%"), "; as plotted, and median / 95% interval over ", length(aligned), " draws):\n", sep = "")
+print(ellipse_counts, n = Inf)
+
 # Candidate species for photos -----------------------------------------------
 # Ranks species by draw-to-draw position stability (lower combined SD = more consistent across
 # the K draws - see species_score_spread above) within whichever Habitat's average ellipse
