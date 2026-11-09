@@ -7,6 +7,7 @@
 # Libraries ---------------------------------------------------------------
 library(tidyverse)
 library(spOccupancy)
+ggplot2::theme_set(cowplot::theme_cowplot())
 
 # Configuration -----------------------------------------------------------
 # Stacked list the multi-season fits were built from (spOccupancy_temporal.R)
@@ -26,6 +27,8 @@ facet_by_cat <- FALSE
 show_species <- NULL
 # Predict focal_cont only across the values observed for each plotted level, and for the levels at which non-focal categorical covariates are held (e.g. no pasture points lie inside forest), rather than across the full range
 restrict_to_observed <- TRUE
+# In-figure caption giving the model tag and plotting conventions; FALSE for figures captioned elsewhere, e.g. in a report
+show_caption <- TRUE
 
 pred_n <- 200
 ci_level <- 0.95
@@ -34,7 +37,7 @@ fixed_vals <- list()
 
 # Display names and colours (same palette as the NMDS figure)
 level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Bosque = "Forest", N = "Not in forest", Y = "In forest")
-level_colors <- c(Pasture = "#eb6834", Silvopasture = "#2a78d6", Forest = "#1baf7a")
+level_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", Forest = "#008300")
 axis_labels <- c(
   Dist_forest = "Distance to forest edge (m; negative = inside forest)", Tot_prec = "Annual precipitation (mm)",
   Year1 = "Year", ssp = "Silvopasture within 300 m (%)", Canopy_cover = "Forest cover within 1 km (%)",
@@ -152,11 +155,11 @@ make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, c
   ## Plot
   x_var <- focal_cont %||% focal_cat
   if (is.null(focal_cont)) {
-    # Categorical focal variable alone: species as jittered points, community mean + credible interval per level
+    # Categorical focal variable alone: species as grey jittered points, community mean + credible interval per level in the level colour
     marginal_plot <- ggplot(mean_df, aes(x = .data[[x_var]], y = mean, color = .data[[x_var]]))
-    if (show_species) marginal_plot <- marginal_plot + geom_jitter(data = species_df, alpha = 0.3, size = 0.8, width = 0.15, height = 0)
+    if (show_species) marginal_plot <- marginal_plot + geom_jitter(data = species_df, color = "grey40", alpha = 0.3, size = 0.8, width = 0.15, height = 0)
     marginal_plot <- marginal_plot +
-      geom_pointrange(aes(ymin = low, ymax = high), linewidth = 1, size = 0.8, color = "black") +
+      geom_pointrange(aes(ymin = low, ymax = high), linewidth = 1, size = 0.8) +
       scale_color_manual(values = plot_colors, guide = "none") +
       theme_bw()
   } else {
@@ -180,13 +183,13 @@ make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, c
   }
   if (x_var %in% settings$integer_axes) marginal_plot <- marginal_plot + scale_x_continuous(breaks = \(lims) seq(ceiling(lims[1]), floor(lims[2]), by = 2))
 
-  y_lab <- c(occupancy = "Occupancy probability (mean across species)", detection = "Detection probability (mean across species)")[[response]]
+  y_lab <- c(occupancy = "Mean occupancy across species", detection = "Mean detection across species")[[response]]
   has_re <- isTRUE(Occ_mod[[c(occupancy = "muRE", detection = "pRE")[[response]]]])
   re_label <- c(occupancy = "with no spatial effect", detection = "")[[response]]
   if (has_re) re_label <- paste(c(occupancy = "at an average farm unit", detection = "for an average collector team")[[response]], re_label)
   caption <- sprintf("%s. Bold: mean across %d species, %g%% CrI, %s; other covariates at their mean or reference level.%s", model_tag, length(Occ_mod$sp.names), 100 * settings$ci_level, str_trim(re_label), if (show_species) " Faint: posterior mean of each species." else "")
   marginal_plot <- marginal_plot +
-    labs(x = settings$axis_labels[x_var] %|% x_var, y = y_lab, color = NULL, fill = NULL, caption = str_wrap(caption, 110)) +
+    labs(x = if (is.null(focal_cont)) NULL else settings$axis_labels[x_var] %|% x_var, y = y_lab, color = NULL, fill = NULL, caption = if (settings$show_caption) str_wrap(caption, 110) else NULL) +
     theme(plot.caption = element_text(hjust = 0))
 
   out_file <- paste0("Figures/marginal_", paste(c(model_tag, tolower(c(focal_cat, focal_cont))), collapse = "_"), if (settings$facet_by_cat) "_facet" else "", ".png")
@@ -206,7 +209,7 @@ covs <- map(covs, \(x) if (is.data.frame(x) || is.matrix(x)) unlist(as.data.fram
 # Plot --------------------------------------------------------------------
 plot_settings <- list(
   pred_n = pred_n, ci_level = ci_level, restrict_to_observed = restrict_to_observed, fixed_vals = fixed_vals,
-  facet_by_cat = facet_by_cat, show_species = show_species, level_labels = level_labels, level_colors = level_colors,
+  facet_by_cat = facet_by_cat, show_species = show_species, show_caption = show_caption, level_labels = level_labels, level_colors = level_colors,
   axis_labels = axis_labels, axis_offsets = axis_offsets, axis_divisors = axis_divisors, integer_axes = integer_axes
 )
 # NA in plot_specs means no focal variable of that kind

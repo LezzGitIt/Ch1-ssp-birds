@@ -12,6 +12,8 @@ trymax_n <- 20
 # cluttered version); FALSE = drop that layer entirely and keep only the representative-species
 # photos/labels, for a cleaner presentation figure. Also controls the export filename below.
 show_species_labels <- TRUE
+# TRUE = every species as a small unlabelled cross at its NMDS position (photographed species larger, so each photo's line ends on a visible mark); crosses keep species apart from the round site points
+show_species_points <- TRUE
 
 # TRUE = drop any individual posterior draw whose own metaMDS fit is degenerate (stress at/below
 # stress_degenerate_threshold - an overfit, uninformative solution, not a genuinely good one) or
@@ -33,9 +35,8 @@ if(nmds_k == 3){
 }
 
 
-# Validated 3-color categorical palette (dataviz skill, palette.md's first three slots -
-# the only ones that clear all-pairs CVD/normal-vision floors together)
-habitat_colors <- c(Pasture = "#eb6834", Silvopasture = "#2a78d6", Forest = "#1baf7a")
+# Habitat palette, gold / violet / green, chosen 2026-11-07 because blue and green looked too similar; validated with the dataviz skill (all-pairs colour-blind separation 16, normal vision 30)
+habitat_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", Forest = "#008300")
 
 # Ellipse level - NULL = plain, unscaled SD ellipse (the standard "ellipses based on the SD of
 # point scores" convention - a dispersion marker, not a coverage claim; points falling outside
@@ -438,6 +439,12 @@ nmds_plot <- ggplot() +
     "text", x = -Inf, y = Inf, hjust = -0.05, vjust = -0.8, size = 14 / .pt,
     label = sprintf("N = %d posterior draws", length(nmds_draws))
   ) +
+  (if (show_species_points) {
+    list(
+      geom_point(data = filter(species_scores, !Species %in% species_photos$Species), aes(x = NMDS1, y = NMDS2), color = "black", alpha = 0.6, size = 2.4, shape = 4, stroke = 0.8),
+      geom_point(data = species_photos, aes(x = NMDS1, y = NMDS2), color = "black", size = 3.6, shape = 4, stroke = 1.4)
+    )
+  }) +
   (if (show_species_labels) {
     geom_text_repel(
       data = species_scores_plot,
@@ -493,12 +500,14 @@ nmds_plot <- ggplot() +
 # Filename tracks show_species_labels so the cluttered and clean versions don't overwrite each other.
 # 16:9 aspect (widescreen PowerPoint slide) rather than the previous ~16:13 - wider canvas at the
 # same height, so the figure fills more of the slide instead of leaving side margins once placed.
-output_file <- paste0("Figures/nmds_habitat_", model_tag, "_posterior", if (show_species_labels) "" else "_no_text", ".png")
+output_file <- paste0("Figures/NMDS_meta/nmds_habitat_", model_tag, "_posterior", if (show_species_labels) "" else "_no_text", ".png")
 ggsave(output_file, nmds_plot, bg = "white", width = 20, height = 11.25)
 
 # The 20x11.25 canvas above is sized generously so margin-space photos never get cut off, which
 # leaves wasted white space wherever the actual content doesn't reach that far - trim it off the
 # saved file directly rather than hand-tuning width/height to match the content's real extent.
-magick::image_read(output_file) %>%
-  magick::image_trim(fuzz = 2) %>%
+# The trim leaves the y-axis title against the left edge, so a white strip as wide as the space below the x-axis title is added back there
+left_pad_px <- 90
+trimmed <- magick::image_trim(magick::image_read(output_file), fuzz = 2)
+magick::image_append(c(magick::image_blank(left_pad_px, magick::image_info(trimmed)$height, "white"), trimmed)) %>%
   magick::image_write(output_file)

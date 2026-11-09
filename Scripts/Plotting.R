@@ -74,6 +74,8 @@ Pc_locs_meta <- Pc_locs_dc_sf %>%
 # Jitter amount scales with how many duplicate-count groups are actually present (rather than a
 # hardcoded-length vector), so this doesn't break if Meta's data has more/fewer overlap levels
 # than the 4 the original full-country version happened to have.
+# Seed the jitter so point positions stay the same between runs
+set.seed(20261108)
 n_dup_groups <- n_distinct(Pc_locs_meta$dup_count)
 jitter_amt <- seq(.02, .08, length.out = n_dup_groups)
 Pc_locs_meta_jit <- Pc_locs_meta %>%
@@ -94,7 +96,8 @@ meta_map <- Col_alt_map +
     xlim = c(bbox_meta[1], bbox_meta[3]), ylim = c(bbox_meta[2], bbox_meta[4]),
     label_axes = "____", expand = TRUE
   ) +
-  annotation_scale(location = "bl") +
+  # White scale-bar text, legible on the dark lowland background
+  annotation_scale(location = "bl", text_col = "white") +
   # CIPAV excluded above, so its level (which sorted first, alphabetically) is dropped from these
   # 5 remaining labels rather than the original 6
   scale_shape_discrete(
@@ -108,7 +111,7 @@ meta_map <- Col_alt_map +
   # request, so the legend reads clearly regardless of the red-on-viridis contrast in the map.
   guides(
     alpha = "none",
-    size = guide_legend(title = "Number of \npoint counts", override.aes = list(color = "black")),
+    size = guide_legend(title = "Number of \npoint counts", override.aes = list(color = "black", shape = 1)), # open circles, like the map symbols
     shape = guide_legend(title = "Data collector", override.aes = list(color = "black"))
   )
 meta_map
@@ -144,7 +147,8 @@ colombia_map <- Col_alt_map_log +
     ymin = bbox_meta["ymin"], ymax = bbox_meta["ymax"],
     fill = NA, color = "black", linewidth = 0.6
   ) +
-  coord_sf(label_axes = "____")
+  # Mainland only: the San Andrés and Providencia islands (west of 80° W) otherwise show as specks in the top-left corner
+  coord_sf(xlim = c(-79.5, co_bbox[["xmax"]]), label_axes = "____")
 colombia_map
 
 # Export ------------------------------------------------------------------
