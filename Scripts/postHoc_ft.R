@@ -104,6 +104,8 @@ covariates_lh <- c("Habitat.Density", "Migration_avo", "Trophic.Level", "Gen_len
 covariates_specialization <- c("Elev_range", "Range.Size", "Forest_bin", "Habitat_breadth", "Diet_breadth") # "Ecological_specialization"
 Ft_lh <- Ft_spp %>% 
   select(Species_ayerbe, all_of(c(covariates_lh, covariates_specialization))) %>%
+  # Residents are the reference, so the migration coefficients compare long-distance and partial migrants with resident species
+  mutate(Migration_avo = fct_relevel(Migration_avo, "Sedentary")) %>%
   # postHocLM cannot accept any missing values in covariates
   filter(if_all(all_of(c(covariates_lh, covariates_specialization)), ~ !is.na(.x)))
 postHoc_l_lh <- list(y = y_draws, covs = Ft_lh)
