@@ -1,0 +1,322 @@
+---
+title: "Silvopasture and bird occupancy in Meta, Colombia: preliminary results"
+author: "Aaron Skinner"
+date: today
+format:
+  pdf:
+    fig-dpi: 300
+    geometry: margin=1in
+    fig-pos: H
+    include-in-header:
+      text: |
+        \usepackage{newunicodechar}
+        \newunicodechar{≥}{\ensuremath{\geq}}
+        \newunicodechar{≤}{\ensuremath{\leq}}
+  docx:
+    fig-dpi: 300
+execute:
+  echo: false
+  warning: false
+  message: false
+---
+
+```{r}
+#| label: config
+library(tidyverse)
+library(knitr)
+
+# Primary occupancy model; to switch to another fit, change this path and rerun the marginal-effects, NMDS and post-hoc trait scripts on it so the figure and table paths below exist for it
+model_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_hinge_f2_inits_2026-11-08.rds"
+# One habitat interaction per model: the primary model holds the precipitation interaction, the other two are fitted separately with the same structure; distance to the forest edge is hinge-coded (Dist_open outside forest, Dist_inside inside it)
+interaction_paths <- c(
+  Tot_prec = model_path,
+  Dist_forest = "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_dist_hinge_f2_inits_2026-11-08.rds",
+  Year1 = "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_year_hinge_f2_inits_2026-11-08.rds"
+)
+# Stacked list the multi-season list was built from (one row per surveyed location x survey period), for the data summary
+stacked_list_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds"
+traits_path <- "../Fd-pd/Derived/Functional_traits_ch1.csv"
+posthoc_path <- paste0("Derived/Excels/postHoc_HabitatSsp_", sub("\\.rds$", "", basename(model_path)), ".csv")
+nmds_cache_path <- "Derived/Rdata/nmds/nmds_habitat_temporal_prec_hinge_f2_inits_98_posterior_K50_dim3_distavg.rds"
+# Species counted inside each habitat ellipse of the NMDS figure, written by the NMDS script
+nmds_counts_path <- "Derived/Excels/nmds_ellipse_counts_temporal_prec_hinge_f2_inits_98.csv"
+fig_paths <- c(
+  # Sampling map exports from the map script: Colombia context map, Meta inset and their shared legend
+  map_colombia = "Figures/Map_sampling/Map_sampling_meta_colombia.png",
+  map_inset = "Figures/Map_sampling/Map_sampling_meta_inset.png",
+  map_legend = "Figures/Map_sampling/Map_sampling_meta_legend.png",
+  habitat = "Figures/marginal_temporal_prec_hinge_f2_habitat.png",
+  interactions = "Figures/marginal_interactions_panel.png",
+  nmds = "Figures/NMDS_meta/nmds_habitat_temporal_prec_hinge_f2_inits_98_posterior_no_text.png"
+)
+# include_graphics() below skips its own existence check (it resolves paths from the project root, pandoc from this file's folder), so check here
+if (!all(file.exists(fig_paths))) stop("Missing figure(s): ", paste(fig_paths[!file.exists(fig_paths)], collapse = ", "))
+# NMDS draws with stress at or below the first value (degenerate) or above the second (not interpretable) are dropped, as in the NMDS script
+nmds_stress_limits <- c(0.01, 0.2)
+# Trait coefficients with P(>0) at or above this value, or at or below one minus it, are highlighted in the trait figure
+trait_p_strong <- 0.9
+
+habitat_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Bosque = "Forest")
+covariate_labels <- c(Tot_prec = "annual precipitation", Dist_forest = "distance to the forest edge", Year1 = "survey year")
+migration_labels <- c(Long_distance = "Long-distance migrant", Partial = "Partial migrant", Sedentary = "Resident")
+```
+
+```{r}
+#| label: extract-fits
+#| cache: true
+#| cache.extra: !expr interaction_paths
+# The cache key includes the fit paths, so switching models re-extracts rather than reusing the old fits
+# Keep only the pieces of each fit the report needs, since each fit is ~2 GB
+extract_fit <- function(path) {
+  fit <- readRDS(path)
+  out <- list(
+    beta_comm = as.matrix(fit$beta.comm.samples), beta = as.matrix(fit$beta.samples), rhat_comm = fit$rhat$beta.comm,
+    n_factors = ncol(as.matrix(fit$lambda.samples)) / length(fit$sp.names), n_post = fit$n.post, n_chains = fit$n.chains,
+    y = fit$y, sp_names = fit$sp.names
+  )
+  rm(fit); gc()
+  out
+}
+fits <- map(interaction_paths, extract_fit)
+```
+
+```{r}
+#| label: summaries
+fit <- fits$Tot_prec
+stacked <- readRDS(stacked_list_path)
+Ft <- read_csv(traits_path, show_col_types = FALSE) %>% mutate(Species = str_replace(Species_ayerbe, " ", "_"))
+
+# Formatting helpers: posterior mean with 95% CrI, and the posterior probability that a quantity is positive
+fmt_ci <- function(x, digits = 2) sprintf(paste0("%.", digits, "f (95%% CrI %.", digits, "f to %.", digits, "f)"), mean(x), quantile(x, 0.025), quantile(x, 0.975))
+fmt_p <- function(x) sprintf("%.2f", mean(x > 0))
+# Year-group codes ("13-14", "19") to calendar years ("2013-14", "2019")
+year_label <- function(code) str_replace_all(code, "(^|-)(\\d{2})", "\\120\\2") %>% str_replace("-20", "-")
+
+## Data scope
+covs <- as_tibble(stacked$occ.covs)
+n_locations <- n_distinct(covs$Id_survey_no_dc)
+locations_by_habitat <- covs %>% distinct(Id_survey_no_dc, Habitat) %>% count(Habitat)
+n_loc_hab <- setNames(locations_by_habitat$n, locations_by_habitat$Habitat)
+n_visits <- sum(!is.na(stacked$y[1, , ]))
+n_periods <- n_distinct(paste(covs$Year_grp, covs$Season))
+years <- range(as.numeric(paste0("20", str_extract(covs$Year_grp, "^\\d{2}"))), as.numeric(paste0("20", str_extract(covs$Year_grp, "\\d{2}$"))))
+n_species <- length(fit$sp_names)
+min_detections <- min(apply(fit$y, 1, sum, na.rm = TRUE))
+
+## Community-level habitat effects (logit scale; relative to pasture, other covariates at their means)
+bc <- fit$beta_comm
+ssp_vs_pasture <- bc[, "HabitatSsp"]
+forest_vs_pasture <- bc[, "HabitatBosque"]
+ssp_vs_forest <- bc[, "HabitatSsp"] - bc[, "HabitatBosque"]
+max_rhat_comm <- max(map_dbl(fits, \(f) max(f$rhat_comm)))
+
+## Community-average predicted occupancy in each habitat: per draw, the mean across species of each species' predicted probability (as in the marginal-effects figures)
+coef_draws <- function(term) fit$beta[, paste0(term, "-", fit$sp_names)]
+b0 <- coef_draws("(Intercept)")
+occ_hab <- list(
+  Pasture = rowMeans(plogis(b0)),
+  Silvopasture = rowMeans(plogis(b0 + coef_draws("HabitatSsp"))),
+  Forest = rowMeans(plogis(b0 + coef_draws("HabitatBosque")))
+)
+
+## Species-level silvopasture effects with the number of visits with a detection
+ssp_sp <- coef_draws("HabitatSsp")
+species_tbl <- tibble(
+  Species = fit$sp_names, Mean = colMeans(ssp_sp), Lower = apply(ssp_sp, 2, quantile, 0.025), Upper = apply(ssp_sp, 2, quantile, 0.975),
+  P_positive = colMeans(ssp_sp > 0), N_det = apply(fit$y, 1, sum, na.rm = TRUE)
+) %>%
+  left_join(select(Ft, Species, Migration_avo, Iucn_red_list), by = "Species") %>%
+  mutate(Width = Upper - Lower, Migration = migration_labels[Migration_avo], Species_label = str_replace(Species, "_", " "))
+n_sp_pos <- sum(species_tbl$Lower > 0)
+n_sp_neg <- sum(species_tbl$Upper < 0)
+# Partial pooling: compare interval widths and distance from the community mean between the least- and most-detected species
+det_split <- median(species_tbl$N_det)
+width_low <- median(species_tbl$Width[species_tbl$N_det < det_split])
+width_high <- median(species_tbl$Width[species_tbl$N_det >= det_split])
+sp_line <- function(sp) with(filter(species_tbl, Species == sp), sprintf("%.2f (95%% CrI %.2f to %.2f; P(>0) = %.2f; %d visits with a detection)", Mean, Lower, Upper, P_positive, N_det))
+migrants <- filter(species_tbl, Migration_avo == "Long_distance") %>% arrange(desc(Mean))
+# Near Threatened or above, other than the Blackpoll Warbler, which has its own sentence
+threatened <- filter(species_tbl, Iucn_red_list != "LC", Species != "Setophaga_striata")
+striata_rank <- rank(-species_tbl$Mean)[species_tbl$Species == "Setophaga_striata"]
+# First survey year of pasture, and the silvopasture location-periods surveyed before it, for the data-scope sentence
+start_year <- as.numeric(paste0("20", str_extract(covs$Year_grp, "^\\d{2}")))
+first_pasture_year <- min(start_year[covs$Habitat == "Pastizales"])
+ssp_early <- covs$Habitat == "Ssp" & start_year < first_pasture_year
+n_ssp_early <- sum(ssp_early)
+ssp_early_years <- knitr::combine_words(year_label(sort(unique(covs$Year_grp[ssp_early]))))
+
+## Habitat interactions, each from its own model
+interaction_draws <- imap(fits, \(f, cov) if (cov == "Dist_forest") {
+  # Hinge coding: pasture's slope with distance outside forest, silvopasture's difference from it, and forest's slope with depth inside forest
+  list(pasture = f$beta_comm[, "Dist_open"], ssp = f$beta_comm[, "Ssp_Dist_open"], inside = f$beta_comm[, "Dist_inside"])
+} else {
+  list(pasture = f$beta_comm[, cov], ssp = f$beta_comm[, paste0("HabitatSsp:", cov)], forest = f$beta_comm[, paste0("HabitatBosque:", cov)])
+})
+# The hinge distance terms are in units of the distance-to-forest SD (m), without centring
+dist_sd <- read_csv(str_replace(stacked_list_path, "\\.rds$", "_scaling.csv"), show_col_types = FALSE) %>%
+  filter(Process == "occupancy", Covariate == "Dist_forest") %>%
+  pull(SD)
+
+## Post-hoc trait models
+posthoc <- read_csv(posthoc_path, show_col_types = FALSE)
+posthoc_terms <- filter(posthoc, Term != "(Intercept)")
+n_traits <- n_distinct(posthoc_terms$Trait)
+n_trait_models <- n_distinct(posthoc_terms$Model)
+n_trait_excl0 <- sum(posthoc_terms$Lower > 0 | posthoc_terms$Upper < 0)
+# Display labels for the trait terms, used in the text and the trait figure
+term_labels <- c(
+  Body_size = "Body size (PC1 of mass, tail, tarsus)", HWI = "Hand-wing index", Beak_size = "Beak size (PC1)", Beak_shape = "Beak shape (PC2)",
+  Eye_resid = "Eye size relative to body size",
+  Habitat.DensityOpen = "Open habitat (vs. dense)", Habitat.DensitySemi_open = "Semi-open habitat (vs. dense)", Migration_avoLong_distance = "Long-distance migrant (vs. resident)", Migration_avoPartial = "Partial migrant (vs. resident)",
+  Trophic.LevelHerbivore = "Herbivore (vs. carnivore)", Trophic.LevelOmnivore = "Omnivore (vs. carnivore)", Gen_length = "Generation length",
+  Elev_range = "Elevational range", Range.Size = "Geographic range size", `Forest_binNon-forest` = "Non-forest species (vs. forest)", Habitat_breadth = "Habitat breadth", Diet_breadth = "Diet breadth",
+  Clutch_mean = "Clutch size", Nest_ground_bushTRUE = "Nests on the ground or in bushes", N_nest_locs_sheard = "Number of nest sites used", Nest_exposure = "Nest enclosure (open to enclosed)"
+)
+# Coefficients with a clear tendency (coloured in the trait figure), strongest first, as "label (mean, CrI; P(>0))" phrases for the text
+strong_traits <- posthoc_terms %>%
+  filter(P_positive >= trait_p_strong | P_positive <= 1 - trait_p_strong) %>%
+  arrange(desc(abs(P_positive - 0.5))) %>%
+  mutate(Label = str_replace(term_labels[Term], "^(\\w)", tolower), Text = sprintf("%s (%.2f, 95%% CrI %.2f to %.2f; P(>0) = %.2f)", Label, Mean, Lower, Upper, P_positive))
+
+## NMDS
+nmds <- readRDS(nmds_cache_path)
+draw_stress <- map_dbl(nmds$nmds_draws, "stress")
+n_nmds_kept <- sum(draw_stress > nmds_stress_limits[1] & draw_stress <= nmds_stress_limits[2])
+# Species whose (posterior-mean) NMDS score lies inside each habitat's bold ellipse, species inside two ellipses counted in each, and outside all three
+nmds_counts <- read_csv(nmds_counts_path, show_col_types = FALSE)
+n_sp_only <- map_int(set_names(unname(habitat_labels)), \(h) sum(nmds_counts$As_plotted[nmds_counts$Class == h]))
+# One phrase per overlap that holds any species, e.g. '2 inside both the pasture and silvopasture ellipses'
+nmds_shared_text <- nmds_counts %>%
+  filter(str_detect(Class, fixed("+")), As_plotted > 0) %>%
+  mutate(Habitats = map_chr(str_split(tolower(Class), fixed(" + ")), \(x) as.character(knitr::combine_words(x))), Text = paste0(As_plotted, " inside ", if_else(str_count(Class, fixed("+")) == 1, "both ", "all of "), "the ", Habitats, " ellipses")) %>%
+  pull(Text)
+n_sp_none <- sum(nmds_counts$As_plotted[nmds_counts$Class == "None"])
+```
+
+## Background and goals
+
+Silvopastoral systems, which combine trees and shrubs with pasture, are promoted in Colombia as a way to make cattle ranching more productive while retaining biodiversity. This report summarizes recent results on how bird occupancy and community composition in silvopasture compare with those in conventional monoculture pasture and in forest. It has three goals: (1) to estimate how occupancy differs among monoculture pasture, silvopasture and forest; (2) to ask whether the effect of silvopasture depends on its climatic and landscape context (annual precipitation and distance to the forest edge) or has changed over time; and (3) to describe how community composition differs among the three habitats.
+
+The data come from the Sustainable Cattle Ranching project and partner monitoring in the department of Meta only (@fig-map): `r n_locations` unique point-count locations (`r n_loc_hab["Pastizales"]` in pasture, `r n_loc_hab["Ssp"]` in silvopasture and `r n_loc_hab["Bosque"]` in forest) surveyed across `r n_periods` survey periods between `r years[1]` and `r years[2]`, for `r format(n_visits, big.mark = ",")` point-count visits in total. Each period is one year group, split into an early and a late round where a location was revisited more than 80 days after its first visit; the habitats surveyed changed over time (@tbl-scope), and pasture and silvopasture were surveyed almost only from `r first_pasture_year` onwards (silvopasture also at `r n_ssp_early` location-periods in `r ssp_early_years`), whereas forest spans the whole period. I fit a hierarchical multi-species occupancy model to the `r n_species` species detected on at least `r min_detections` visits. Each species has its own coefficients, drawn from a community-level distribution, so species with few detections borrow strength from the community (partial pooling). Occupancy was modeled as a function of habitat, annual precipitation, distance to the forest edge, the proportion of silvopasture within 300 m and survey year, with a spatial random effect built from `r fit$n_factors` latent spatial factors linking nearby locations. Distance to the forest edge entered as a piecewise linear effect with a fixed breakpoint at the forest edge, allowing separate slopes outside and inside forest, and a habitat-specific step at the edge, so habitats are compared at the forest edge. Detection depends on whether the point is in forest, start time of the point count, the probability of breeding activity on the survey date, the day of the survey and the observer team. Each habitat interaction was fitted in its own model. All models were fitted in a Bayesian framework (`r fit$n_chains` chains, `r format(fit$n_chains * fit$n_post, big.mark = ",")` posterior draws kept per model); all community-level parameters had Rhat ≤ `r sprintf("%.2f", max_rhat_comm)`. Effects are given as posterior means with 95% credible intervals (CrI) on the logit (log-odds) scale, with the posterior probability that the effect is positive, P(\>0).
+
+```{r}
+#| label: fig-map
+#| fig-cap: "Point-count locations in Meta, Colombia. Left: Colombia's departments, with Meta outlined in red, the main rivers in blue and the area of the right panel boxed; elevation on a log scale. Right: point-count locations, by data collector (symbol) and number of locations in each 0.015° cell (symbol size), jittered so that neighbouring cells do not overlap; elevation on a linear scale."
+#| out-width: "100%"
+# Join the three map exports side by side at a common height; the legend is padded rather than enlarged
+map_imgs <- map(fig_paths[c("map_colombia", "map_inset", "map_legend")], magick::image_read)
+map_height <- max(map_dbl(map_imgs, \(img) magick::image_info(img)$height))
+map_panels <- c(magick::image_scale(map_imgs$map_colombia, paste0("x", map_height)), magick::image_scale(map_imgs$map_inset, paste0("x", map_height)), magick::image_extent(map_imgs$map_legend, paste0(magick::image_info(map_imgs$map_legend)$width + 60, "x", map_height), gravity = "center", color = "white"))
+# Saved to Derived/ (recreated on every render) and included from this file's folder, like the figures below
+map_file <- "Derived/Preliminary_results_map.png"
+magick::image_write(magick::image_append(map_panels), map_file)
+include_graphics(file.path("../..", map_file), error = FALSE)
+```
+
+```{r}
+#| label: tbl-scope
+#| tbl-cap: "Number of point-count locations surveyed in each habitat in each survey period (Meta). The early and late rounds of a year group are visits to the same locations more than 80 days apart."
+covs %>%
+  count(Year_grp, Season, Habitat) %>%
+  mutate(Period = paste0(year_label(Year_grp), ", ", tolower(Season), " round"), Habitat = factor(habitat_labels[Habitat], levels = habitat_labels)) %>%
+  select(Period, Habitat, n) %>%
+  pivot_wider(names_from = Habitat, values_from = n, values_fill = 0, names_sort = TRUE) %>%
+  rename(`Survey period` = Period) %>%
+  kable()
+```
+
+## Occupancy in pasture, silvopasture and forest
+
+Occupancy was higher in silvopasture than in monoculture pasture for the community as a whole: the community-mean effect of silvopasture relative to pasture was `r fmt_ci(ssp_vs_pasture)` (P(\>0) = `r fmt_p(ssp_vs_pasture)`), and that of forest relative to pasture was `r fmt_ci(forest_vs_pasture)` (P(\>0) = `r fmt_p(forest_vs_pasture)`). Silvopasture remained below forest (difference `r fmt_ci(ssp_vs_forest)`; P(\>0) = `r fmt_p(ssp_vs_forest)`). On the probability scale and at the forest edge, the mean predicted occupancy across species was `r fmt_ci(occ_hab$Pasture)` in pasture, `r fmt_ci(occ_hab$Silvopasture)` in silvopasture and `r fmt_ci(occ_hab$Forest)` in forest (@fig-habitat).
+
+```{r}
+#| label: fig-habitat
+#| fig-cap: "Mean predicted occupancy probability across bird species in monoculture pasture, silvopasture and forest. Coloured points are posterior means and bars are 95% credible intervals of the mean across species of each species' predicted occupancy, at the forest edge, with other covariates held at their means and the spatial effect at zero. Grey points are the posterior means of individual species."
+#| out-width: "85%"
+include_graphics(file.path("../..", fig_paths["habitat"]), error = FALSE)
+```
+
+Species-level effects varied around this community mean. For `r n_sp_pos` of `r n_species` species the 95% CrI of the silvopasture effect lay entirely above zero, and for `r n_sp_neg` entirely below. The Blackpoll Warbler (*Setophaga striata*), a boreal migrant listed as Near Threatened, had `r if (striata_rank == 1) "the largest" else paste("the", scales::ordinal(striata_rank), "largest")` silvopasture effect of the `r n_species` species: `r sp_line("Setophaga_striata")`. The other species listed as Near Threatened by the IUCN: `r paste0("*", threatened$Species_label, "* (", threatened$Iucn_red_list, "): ", map_chr(threatened$Species, sp_line), collapse = "; ")`. The `r nrow(migrants)` long-distance migrants in the model were `r paste0("*", migrants$Species_label, "* (", sprintf("%.2f", migrants$Mean), ")", collapse = ", ")` (posterior means). It is important to note that the model pools information across species, each species' estimate is pulled towards the community mean, with stronger partial pooling in data-sparse species.
+
+```{r}
+#| label: fig-species
+#| eval: false
+#| include: false
+# Dropped from the report for now (user, 2026-11-06); set eval and include back to true to restore it
+#| fig-cap: "Effect of silvopasture relative to monoculture pasture on the occupancy of each species (logit scale; posterior mean and 95% credible interval), at mean annual precipitation. Colour gives migratory status, point size the number of point-count visits on which the species was detected, and the number at the right of each panel repeats that count. Species are ranked by effect, continuing from the left panel to the right. The solid vertical line is the community mean and the dashed line zero effect. Species detected on few visits are pulled towards the community mean by partial pooling, so their intervals are wide."
+#| fig-height: 7.4
+#| fig-width: 6.5
+# Two side-by-side panels ranked by effect (largest at top left) so the 98 species fit on one page with the caption
+species_tbl %>%
+  mutate(Panel = if_else(rank(-Mean, ties.method = "first") <= ceiling(n() / 2), "Larger effects", "Smaller effects"),
+         Species_label = fct_reorder(Species_label, Mean)) %>%
+  ggplot(aes(x = Mean, y = Species_label, colour = Migration)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_vline(xintercept = mean(ssp_vs_pasture)) +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper), height = 0, alpha = 0.6) +
+  geom_point(aes(size = N_det)) +
+  geom_text(aes(x = max(Upper) + 0.08 * diff(range(c(Lower, Upper))), label = N_det), hjust = 0, size = 2, colour = "grey30") +
+  facet_wrap(~ Panel, ncol = 2, scales = "free_y") +
+  scale_x_continuous(expand = expansion(mult = c(0.03, 0.15))) +
+  scale_colour_manual(values = c("Long-distance migrant" = "#2a78d6", "Partial migrant" = "#c2410c", "Resident" = "grey45")) +
+  scale_size_area(max_size = 2.5, breaks = c(25, 100, 300)) +
+  labs(x = "Effect of silvopasture vs. pasture on occupancy (log-odds)", y = NULL, colour = "Migratory status", size = "Visits with a detection") +
+  theme_minimal(base_size = 8) +
+  theme(axis.text.y = element_text(face = "italic", size = 5.5), strip.text = element_blank(), legend.position = "top", legend.box = "vertical", legend.margin = margin(0, 0, 0, 0))
+```
+
+## Does the effect of silvopasture depend on context?
+
+Each habitat interaction was fit in a separate model.`r if (fits$Year1$n_factors != fit$n_factors) paste0(" The habitat-by-year model is an earlier fit with ", fits$Year1$n_factors, " spatial factors rather than ", fit$n_factors, " and distance to the forest edge as a single linear term; a refit matching the other models is running.") else ""` The slope of occupancy with annual precipitation was `r fmt_ci(interaction_draws$Tot_prec$ssp)` steeper in silvopasture than in pasture (P(\>0) = `r fmt_p(interaction_draws$Tot_prec$ssp)`), whereas in forest it hardly differed from pasture (`r fmt_ci(interaction_draws$Tot_prec$forest)`; P(\>0) = `r fmt_p(interaction_draws$Tot_prec$forest)`; @fig-interactions a). So there is moderate evidence that the advantage of silvopasture over pasture grows with precipitation. Occupancy declined with distance from the forest edge in pasture (slope per `r round(dist_sd)` m `r fmt_ci(interaction_draws$Dist_forest$pasture)`), and the decline in silvopasture was similar (difference from pasture `r fmt_ci(interaction_draws$Dist_forest$ssp)`; P(\>0) = `r fmt_p(interaction_draws$Dist_forest$ssp)`); inside forest, occupancy `r if (mean(interaction_draws$Dist_forest$inside) < 0) "declined" else "rose"` with depth from the edge (slope per `r round(dist_sd)` m `r fmt_ci(interaction_draws$Dist_forest$inside)`; @fig-interactions b). Over time, occupancy in pasture declined (slope `r fmt_ci(interaction_draws$Year1$pasture)`), while the silvopasture slope differed from it by `r fmt_ci(interaction_draws$Year1$ssp)` (P(\>0) = `r fmt_p(interaction_draws$Year1$ssp)`; @fig-interactions c), so occupancy in silvopasture was roughly stable.
+
+```{r}
+#| label: fig-interactions
+#| fig-cap: "Mean predicted occupancy across species in each habitat (posterior mean and 95% credible band) along (a) annual precipitation, (b) distance to the forest edge (negative distances are inside forest) and (c) survey year, each from its own model with that habitat interaction. Each curve spans the values observed in that habitat; other covariates are held at their means, with distance at the forest edge in (a) and (c)."
+#| out-width: "100%"
+include_graphics(file.path("../..", fig_paths["interactions"]), error = FALSE)
+```
+
+## Community composition
+
+Communities differed in composition among the three habitats (@fig-nmds). The ordination is built from the model's estimated presence or absence of every species at each surveyed location and period, so it includes species present but undetected. It is repeated on `r length(draw_stress)` posterior draws to carry their uncertainty; `r n_nmds_kept` draws had interpretable solutions (stress between `r nmds_stress_limits[1]` and `r nmds_stress_limits[2]`), and the reference solution had a stress of `r sprintf("%.2f", nmds$nmds_ref$stress)`.
+
+```{r}
+#| label: fig-nmds
+#| fig-cap: !expr paste0("Non-metric multidimensional scaling (NMDS; Bray-Curtis dissimilarity, three dimensions, first two shown) of bird communities at each surveyed location and period, coloured by habitat. Ellipses show one standard deviation of location scores for each habitat, drawn for each of the ", n_nmds_kept, " retained posterior draws after aligning each draw's ordination to a reference solution. Crosses are species scores, the expanded weighted averages of the scores of the locations where each species is estimated present (the vegan default); larger crosses mark the pictured species. Of the ", sum(nmds_counts$As_plotted), " species, ", n_sp_only["Pasture"], " lie only inside the pasture ellipse, ", n_sp_only["Silvopasture"], " only inside the silvopasture ellipse and ", n_sp_only["Forest"], " only inside the forest ellipse; ", if (length(nmds_shared_text) > 0) paste0(knitr::combine_words(nmds_shared_text), ", and ") else "", n_sp_none, " outside all three.")
+#| out-width: "100%"
+include_graphics(file.path("../..", fig_paths["nmds"]), error = FALSE)
+```
+
+## Which species respond most to silvopasture? Trait models
+
+To ask whether species' traits explain their response to silvopasture, I regressed each species' silvopasture effect (relative to pasture) on its traits, carrying the full posterior of the occupancy model into each regression. I tested `r n_traits` traits in `r n_trait_models` models covering morphology, eye size, life history, ecological specialization, clutch size, nest location and nest enclosure (@fig-traits). `r if (n_trait_excl0 == 0) "No trait clearly explained species' responses: every coefficient's 95% CrI overlapped zero" else paste(n_trait_excl0, "of the", nrow(posthoc_terms), "coefficients had a 95% CrI excluding zero")`, and the models explained little variation (median Bayesian R² from `r sprintf("%.2f", min(posthoc$Bayes_R2))` to `r sprintf("%.2f", max(posthoc$Bayes_R2))`). The clearest tendencies, with P(\>0) ≥ `r trait_p_strong` or ≤ `r 1 - trait_p_strong` (coloured in @fig-traits), were `r knitr::combine_words(strong_traits$Text)`.
+
+```{r}
+#| label: fig-traits
+#| fig-cap: !expr paste0("Trait models of species' silvopasture effects. Points and bars are the posterior mean and 95% credible interval of each coefficient, the change in a species' silvopasture effect (logit scale) per standard deviation of a continuous trait, or relative to the reference level of a categorical trait (residents for migratory status). Each panel is one model, labelled with its number of species (N, those with data for every trait in it) and median Bayesian R². Coefficients with P(>0) ≥ ", trait_p_strong, " or ≤ ", 1 - trait_p_strong, " are in colour.")
+#| fig-height: 6.5
+#| fig-width: 6.5
+model_labels <- c(Morphology = "Morphology", Eye_size = "Eye size", Life_history = "Life history", Specialization = "Specialization", Clutch_size = "Clutch size", Nest_location = "Nest location", Nest_exposure = "Nest enclosure")
+posthoc_terms %>%
+  mutate(Panel = fct_inorder(sprintf("%s (N = %d, R² = %.2f)", model_labels[Model], N_species, Bayes_R2)),
+         Trait = fct_rev(fct_inorder(term_labels[Term])),
+         Direction = case_when(P_positive >= trait_p_strong ~ "Positive", P_positive <= 1 - trait_p_strong ~ "Negative", .default = "Weak")) %>%
+  ggplot(aes(x = Mean, y = Trait, colour = Direction)) +
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  geom_errorbarh(aes(xmin = Lower, xmax = Upper), height = 0) +
+  geom_point(size = 1.8) +
+  facet_grid(Panel ~ ., scales = "free_y", space = "free_y", switch = "y") +
+  scale_colour_manual(values = c(Positive = "#2a78d6", Negative = "#c2410c", Weak = "grey55"), guide = "none") +
+  labs(x = "Change in silvopasture effect (log-odds)", y = NULL) +
+  theme_minimal(base_size = 9) +
+  theme(strip.placement = "outside", strip.text.y.left = element_text(angle = 0, hjust = 1, face = "bold", size = 7), panel.spacing.y = unit(4, "pt"), panel.border = element_rect(fill = NA, colour = "grey85"))
+```
+
+## Takeaways
+
+- **Silvopasture supports more birds than monoculture pasture, but does not replace forest.** At the forest edge, mean predicted occupancy across species was `r sprintf("%.2f", mean(occ_hab$Pasture))` in pasture, `r sprintf("%.2f", mean(occ_hab$Silvopasture))` in silvopasture and `r sprintf("%.2f", mean(occ_hab$Forest))` in forest (silvopasture vs. pasture P(\>0) = `r fmt_p(ssp_vs_pasture)`).
+- **The benefit is broad but uneven across species.** `r n_sp_pos` of `r n_species` species had a clearly positive silvopasture effect and `r n_sp_neg` had a clearly negative one; the Near Threatened Blackpoll Warbler had `r if (striata_rank == 1) "the largest" else paste("the", scales::ordinal(striata_rank), "largest")` effect.
+- **Context matters.** The impact of silvopasture on biodiversity increases with annual precipitation (P(\>0) = `r fmt_p(interaction_draws$Tot_prec$ssp)`), and occupancy fell with distance from the forest edge in both pasture and silvopasture. This suggests that silvopasture implemented in wetter climates and near forest fragments would likely benefit biodiversity more than silvopasture implemented in more xeric climates and further from forest fragments.
+  - Mean occupancy across species is highest at the edge of forest fragments.
+- **Silvopasture communities are intermediate in composition** between pasture and forest and overlapping pasture slightly more than forest (@fig-nmds).
+- **No trait clearly predicts which species benefit**; the clearest tendencies (P(\>0) ≥ `r trait_p_strong` or ≤ `r 1 - trait_p_strong`) involved `r knitr::combine_words(str_remove(strong_traits$Label, " \\(.*"))`.
