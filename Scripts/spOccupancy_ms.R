@@ -24,7 +24,7 @@ filter <- dplyr::filter
 
 # Create space by removing old models
 rm(list = ls()[!(ls() %in% c())])
-msOcc_l_path <- "Derived/Rdata/Model_input/msOcc_l_meta_98_hab_fix_jit2.rds"
+msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit2.rds"
 msOcc_l <- readRDS(msOcc_l_path)
 
 ## Load data
@@ -296,7 +296,7 @@ end - start
 Occ_mod <- ms_100
   
 # >Save model -------------------------------------------------------------
-save_path <- paste0("Derived/Rdata/Model_output/Occ_mod_", N_spp, "spp", N_ecor, "ecor_restrict_phi", Sys.Date(), ".rds")
+save_path <- paste0("Derived/Rdata/Model_output/Stacked/Occ_mod_", N_spp, "spp", N_ecor, "ecor_restrict_phi", Sys.Date(), ".rds")
 #Occ_mod <- readRDS("Derived/Rdata/Model_output/Occ_mod_42spp_causal2026-03-12.rds")
 saveRDS(Occ_mod, save_path)
 rm(list = ls()[!(ls() %in% c("msOcc_l", "Occ_mod", "Row_identifier"))])

@@ -91,3 +91,6 @@ Data/
 
 # Correspondence drafts and other working documents kept local
 Docs/
+
+# Presentation decks (figure sources kept local)
+*.pptx

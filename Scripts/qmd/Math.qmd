@@ -9,7 +9,7 @@ editor: visual
 The same symbols and subscripts are used throughout.
 
 | Symbol | Meaning | In spOccupancy output |
-|----|----|----|
+|------------------------|------------------------|------------------------|
 | $i = 1, \dots, I$ | species ($I$ = number of species, 99) | `sp.names` |
 | $j = 1, \dots, J$ | site, i.e. one point count location × year group × season row ($J$ = 460) | rows of `occ.covs` |
 | $k = 1, \dots, K_j$ | replicate survey at site $j$ (up to 5) | columns of `det.covs` |
@@ -247,7 +247,7 @@ The figures below use a fitted model. It was fit before the collector-team and r
 #| message: false
 #| warning: false
 # Fitted model whose spatial factors are summarized below; only the pieces needed are kept, since the full object is ~2 GB
-model_path <- "Derived/Rdata/Model_output/Occ_mod_99spp_1ecor_ssp2026-10-24.rds"
+model_path <- "Derived/Rdata/Model_output/Stacked/Occ_mod_99spp_1ecor_ssp2026-10-24.rds"
 fit <- readRDS(model_path)
 fit_parts <- list(
   phi = fit$theta.samples[, grep("^phi", colnames(fit$theta.samples))],
