@@ -58,7 +58,7 @@ extract_vars <- function(term) {
   setdiff(str_extract_all(term, "[A-Za-z][A-Za-z0-9_.]*")[[1]], c("I", "scale", "log", "exp", "sqrt"))
 }
 
-# One figure: predictions from one fitted model along focal_cont (by focal_cat), axes in original units, saved under Figures/ and printed; covs and scaling come from the data list, settings from the configuration
+# One figure: predictions from one fitted model along focal_cont (by focal_cat), axes in original units, saved under Figures/Marginal_effects/ and printed; covs and scaling come from the data list, settings from the configuration
 make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, covs, scaling, response, settings) {
   Occ_mod <- readRDS(Occ_mod_path)
   show_species <- settings$show_species %||% (is.null(focal_cat) || is.null(focal_cont) || settings$facet_by_cat)
@@ -192,7 +192,7 @@ make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, c
     labs(x = if (is.null(focal_cont)) NULL else settings$axis_labels[x_var] %|% x_var, y = y_lab, color = NULL, fill = NULL, caption = if (settings$show_caption) str_wrap(caption, 110) else NULL) +
     theme(plot.caption = element_text(hjust = 0))
 
-  out_file <- paste0("Figures/marginal_", paste(c(model_tag, tolower(c(focal_cat, focal_cont))), collapse = "_"), if (settings$facet_by_cat) "_facet" else "", ".png")
+  out_file <- paste0("Figures/Marginal_effects/marginal_", paste(c(model_tag, tolower(c(focal_cat, focal_cont))), collapse = "_"), if (settings$facet_by_cat) "_facet" else "", ".png")
   ggsave(out_file, marginal_plot, width = 8, height = 5.5, bg = "white")
   print(marginal_plot)
   invisible(marginal_plot)
