@@ -44,6 +44,8 @@ habitat_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", Forest = "#00
 # ellipse - see conc_ellipse() below for why that's not the same as "X% SD" and why NULL is the
 # better default for this particular plot.
 ellipse_level <- NULL
+# Species outside all three ellipses are re-classified against the same ellipses enlarged by this factor (2 = twice the radius; not plotted), to show which habitat they lean towards
+ellipse_wide_scale <- 2
 
 # Drop species predicted present at fewer than this many sites (mean across the K draws) from
 # the plotted labels, to declutter - set to 0 to keep everyone
@@ -393,6 +395,16 @@ ellipse_counts <- count(species_scores, Class = Ellipse_class, name = "As_plotte
 write_csv(ellipse_counts, paste0("Derived/Excels/nmds_ellipse_counts_", model_tag, ".csv"))
 cat("\nSpecies inside each habitat ellipse (", if (is.null(ellipse_level)) "1 SD" else paste0(100 * ellipse_level, "%"), "; as plotted, and median / 95% interval over ", length(aligned), " draws):\n", sep = "")
 print(ellipse_counts, n = Inf)
+## Species outside all three ellipses, against the bold ellipses enlarged ellipse_wide_scale times (as plotted positions only)
+wide_fits <- map(mean_fits, \(g) { g$scale <- g$scale * ellipse_wide_scale; g })
+outside_counts <- species_scores %>%
+  filter(Ellipse_class == "None") %>%
+  mutate(Class = ellipse_class(cbind(NMDS1, NMDS2), wide_fits)) %>%
+  count(Class, name = "As_plotted") %>%
+  arrange(desc(As_plotted), Class)
+write_csv(outside_counts, paste0("Derived/Excels/nmds_ellipse_counts_outside_x", ellipse_wide_scale, "_", model_tag, ".csv"))
+cat("\nSpecies outside all three ellipses, against the ellipses enlarged ", ellipse_wide_scale, " times:\n", sep = "")
+print(outside_counts, n = Inf)
 
 # Candidate species for photos -----------------------------------------------
 # Ranks species by draw-to-draw position stability (lower combined SD = more consistent across
