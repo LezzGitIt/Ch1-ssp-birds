@@ -189,6 +189,11 @@ fill_nearest_period <- function(m) {
   t(apply(m, 1, function(r) { obs <- which(!is.na(r)); r[sapply(seq_along(r), function(t) obs[which.min(abs(obs - t))])] }))
 }
 
+# Mean survey date (decimal years) of each location-period, from a visit-level table with a Date column; occupancy covariates must be constant within a location-period, hence the mean
+survey_dates <- function(event_covs, by = c("Id_survey", "Year_grp", "Season")) {
+  dplyr::summarise(event_covs, Survey_date = lubridate::decimal_date(mean(as.Date(Date))), .by = dplyr::all_of(by))
+}
+
 # Fit one multi-season multi-species occupancy model (spOccupancy::svcTMsPGOcc with a spatially varying intercept only, or spOccupancy::tMsPGOcc when spatial = FALSE) and save it with a fit summary beside it; each call is independent, so a crashed or cached fit never affects another
 # settings: list with det.formula, priors, n.neighbors, n.factors, batch.length, ar1, mcmc (list of n.batch, n.burn, n.thin, n.chains), out_dir and optionally seed; mcmc, n_factors and seed override the settings for one call; seed is passed to set.seed() before sampling (NULL leaves the random state alone); inits is a list of extra starting values added to the z starting values, e.g. list(lambda = list(<species x factor matrix>)) to start the loadings from an earlier fit (spOccupancy uses the same loadings start in every chain, and redraws the other parameters' starts for chains 2+)
 fit_temporal <- function(data, occ.formula, tag, settings, mcmc = settings$mcmc, n_factors = settings$n.factors, seed = settings$seed, inits = NULL, spatial = TRUE, smoke = FALSE) {

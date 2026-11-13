@@ -1,6 +1,6 @@
 ## PhD birds in silvopastoral landscapes ##
 # Multi-season (temporal) spatial multi-species occupancy model (spOccupancy::svcTMsPGOcc with svc.cols = 1, i.e. a spatially varying intercept only), adapted from Doser's space-time vignette (Extra_scripts/spaceTimeModelsHTML.Rmd): each physical location is one site with one spatial effect, and the year-group x season survey periods are a separate time dimension, so stacked copies of a location no longer need jittered coordinates
-# Model family: Bernoulli occupancy and Bernoulli detection with logit links (Polya-Gamma sampler); spatial NNGP exponential process with 6 latent factors; no AR(1) temporal effect (periods are unequally spaced 2013-2026), the trend is carried by the Year1 fixed effect as in the stacked model
+# Model family: Bernoulli occupancy and Bernoulli detection with logit links (Polya-Gamma sampler); spatial NNGP exponential process with 6 latent factors; no AR(1) temporal effect (periods are unequally spaced 2013-2026), the trend is carried by the Survey_date fixed effect (mean survey date of the location-period; lists built before 2026-11-09 carry Year1, the year-group's first year, instead)
 # Non-spatial comparison (spOccupancy::tMsPGOcc): same likelihood and links, no spatial process and no latent factors (tMsPGOcc has neither); periods at a location are linked only through an unstructured location random effect, as in the vignette's tPGOcc example
 # svcTMsPGOcc with svc.cols = 1 is the same model as stMsPGOcc (seeded runs give bit-identical draws, 2026-11-02) but, unlike stMsPGOcc, accepts range.ind (species x location, so clipping is spatial, not seasonal); tMsPGOcc has no range.ind, so the non-spatial fits are unclipped
 # Run headless with: nohup caffeinate -is Rscript Scripts/spOccupancy_temporal.R <section(s)> > <log> 2>&1 &  (sections: additive, prec, prec_nofarm, prec_nofarm_long, prec_ns, prec_ns_loc, year_nofarm_long, dist_nofarm_long, prec_nofarm_long_f2; or smoke for a 10-batch, 1-chain dimension check)
@@ -23,7 +23,7 @@ Site_col <- "Id_survey_no_dc"
 Time_cols <- c("Year_grp", "Season")
 Time_levels <- c("13-14.Early", "13-14.Late", "16-17.Early", "16-17.Late", "19.Early", "22.Early", "24.Early", "25-26.Early")
 ## The multi-season models need occupancy covariates in every site x period cell, including periods a location was not surveyed (no detection data there): covariates that describe the period are filled with the period mean, all other time-varying covariates with the location's value from its nearest surveyed period
-Period_covs <- "Year1"
+Period_covs <- "Survey_date"
 
 ## Sections to run; command-line arguments override this
 run_sections <- c("additive", "prec")
@@ -31,16 +31,16 @@ if (length(commandArgs(trailingOnly = TRUE)) > 0) run_sections <- commandArgs(tr
 
 ## Formulas
 occ_formulas <- list(
-  additive = ~ Habitat + ssp + Dist_forest + Year1 + Tot_prec + (1 | Farm_join_num),
-  prec = ~ Habitat * Tot_prec + Dist_forest + ssp + Year1 + (1 | Farm_join_num),
+  additive = ~ Habitat + ssp + Dist_forest + Survey_date + Tot_prec + (1 | Farm_join_num),
+  prec = ~ Habitat * Tot_prec + Dist_forest + ssp + Survey_date + (1 | Farm_join_num),
   # Spatial process and Farm_join compete (intercept and farm variance mix poorly together, model log rows 71-72 and 77-78), so each is fitted without the other
-  prec_nofarm = ~ Habitat * Tot_prec + Dist_forest + ssp + Year1,
-  prec_ns = ~ Habitat * Tot_prec + Dist_forest + ssp + Year1 + (1 | Farm_join_num) + (1 | Site_num),
+  prec_nofarm = ~ Habitat * Tot_prec + Dist_forest + ssp + Survey_date,
+  prec_ns = ~ Habitat * Tot_prec + Dist_forest + ssp + Survey_date + (1 | Farm_join_num) + (1 | Site_num),
   # Location and Farm_join variances compete in prec_ns (locations are nested in the 13 units), so the location effect is also fitted alone
-  prec_ns_loc = ~ Habitat * Tot_prec + Dist_forest + ssp + Year1 + (1 | Site_num),
+  prec_ns_loc = ~ Habitat * Tot_prec + Dist_forest + ssp + Survey_date + (1 | Site_num),
   # One habitat interaction per model (two in one model judged too costly), each on the primary no-Farm_join structure
-  year_nofarm = ~ Habitat * Year1 + Tot_prec + Dist_forest + ssp,
-  dist_nofarm = ~ Habitat * Dist_forest + Tot_prec + ssp + Year1
+  year_nofarm = ~ Habitat * Survey_date + Tot_prec + Dist_forest + ssp,
+  dist_nofarm = ~ Habitat * Dist_forest + Tot_prec + ssp + Survey_date
 )
 det.formula <- ~ Forest_bin + Pc_start + I(Pc_start^2) + Prob_breed + Sampling_day_log + (1 | Collector_team_num)
 
@@ -84,7 +84,8 @@ if (file.exists(tmsOcc_l_path)) {
       if (!is.numeric(v)) return(NULL)
       m <- matrix(NA_real_, n_site, n_time, dimnames = list(Site_levels, Time_levels))
       m[cbind(site_i, time_i)] <- v
-      if (nm %in% Period_covs) return(matrix(colMeans(m, na.rm = TRUE), n_site, n_time, byrow = TRUE, dimnames = dimnames(m)))
+      # Only the unsurveyed cells take the period mean, so locations surveyed at a different date from the rest of their period keep their own date
+      if (nm %in% Period_covs) return(ifelse(is.na(m), matrix(colMeans(m, na.rm = TRUE), n_site, n_time, byrow = TRUE), m))
       fill_nearest_period(m)
     }) %>% compact()
   ## Detection covariates: stacked row x replicate tables -> site x time x replicate arrays, kept only where the survey happened; Y/N text coded 1/0 because arrays must be numeric, and covariates with no values at all (Pc_duration: constant 10 min, so scaling gave NaN) are dropped
@@ -149,7 +150,7 @@ if ("prec_nofarm_long" %in% run_sections) Occ_mod_prec_nofarm_long <- fit_tempor
 # Habitat x Tot_prec, non-spatial, location only --------------------------
 if ("prec_ns_loc" %in% run_sections) Occ_mod_prec_ns_loc <- fit_temporal(tmsOcc_l, occ_formulas$prec_ns_loc, "prec_ns_loc", settings = fit_settings, spatial = FALSE)
 
-# Habitat x Year1, spatial, no Farm_join, long run ------------------------
+# Habitat x Survey_date, spatial, no Farm_join, long run ------------------------
 if ("year_nofarm_long" %in% run_sections) Occ_mod_year_nofarm_long <- fit_temporal(tmsOcc_l, occ_formulas$year_nofarm, "year_nofarm_long", settings = fit_settings, mcmc = mcmc_long)
 
 # Habitat x Dist_forest, spatial, no Farm_join, long run ------------------

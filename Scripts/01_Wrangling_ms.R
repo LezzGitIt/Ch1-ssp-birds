@@ -243,9 +243,11 @@ Order_meta_no_forest %in% Bird_pcs_analysis4$Species_ayerbe_
 ## Covariates that are fixed for a given point count x Year_grp combination
 date_join_year <- Event_covs %>% 
   distinct(Id_survey_no_dc, across(all_of(Row_identifier)), Year, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
+## Time covariate: mean survey date of each location x period in decimal years (occupancy covariates must be constant within a location-period), replacing the year-group's first year (Year1), which put e.g. the locations surveyed only in Nov-Dec 2017 at 2016
+Survey_dates <- survey_dates(Event_covs, by = Row_identifier)
 
 Site_covs2 <- Site_covs %>%
-  full_join(date_join_year) %>% 
+  full_join(date_join_year) %>%
   # Change these two points to "Mosaic". This allows them to be included without biasing any of the landcovers we care more about (ssp, forest)
   mutate(
     Habitat = if_else(Habitat == "Cultivos", "Mosaic", Habitat)
@@ -255,13 +257,12 @@ Site_covs2 <- Site_covs %>%
   arrange(across(all_of(Row_identifier))) %>%
   # Otún Quimbaya (Risaralda) has no SCR property polygon, so give its points their own Id_scr
   mutate(Id_scr = ifelse(str_detect(Id_survey_no_dc, "^MB-R-OQ_"), "Oq_farm_id", Id_scr)) %>%
+  left_join(Survey_dates, by = Row_identifier, relationship = "one-to-one") %>%
   mutate(
-    # Take the earlier of the two years so it is numeric
-    Year1 = as.numeric(str_split_i(Year_grp, "-", 1)),
     across(where(is.character), as.factor),
     Ecoregion = relevel(Ecoregion, ref = "Piedemonte")
   ) %>%
-  select(all_of(Row_identifier), Year1, Id_survey_no_dc, Farm_name, Id_scr, Uniq_db, Department, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
+  select(all_of(Row_identifier), Survey_date, Id_survey_no_dc, Farm_name, Id_scr, Uniq_db, Department, Ecoregion, Elev, Tot_prec, Habitat, Habitat_sub, Uniq_db, Canopy_cover, Canopy_height_m, ssp, te, Dist_forest)
 
 if(Habitat_split_i){
   Site_covs2 <- Site_covs2 %>% 

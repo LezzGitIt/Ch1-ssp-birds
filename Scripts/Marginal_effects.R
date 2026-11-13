@@ -40,14 +40,14 @@ level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Bosque = "Forest
 level_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", Forest = "#008300")
 axis_labels <- c(
   Dist_forest = "Distance to forest edge (m; negative = inside forest)", Tot_prec = "Annual precipitation (mm)",
-  Year1 = "Year", ssp = "Silvopasture within 300 m (%)", Canopy_cover = "Forest cover within 1 km (%)",
+  Year1 = "Year", Survey_date = "Year", ssp = "Silvopasture within 300 m (%)", Canopy_cover = "Forest cover within 1 km (%)",
   Habitat = "Habitat", Pc_start = "Start time (hours after midnight)", Prob_breed = "Breeding probability"
 )
-# Applied after back-transforming: offsets are added (Year1 is stored as the two-digit first year of the year group), divisors convert units (Pc_start is in seconds)
+# Applied after back-transforming: offsets are added (Year1, in fits built before 2026-11-09, is stored as the two-digit first year of the year group; Survey_date is already in decimal years), divisors convert units (Pc_start is in seconds)
 axis_offsets <- c(Year1 = 2000)
 axis_divisors <- c(Pc_start = 3600)
-# Axes labelled in whole units every 2 (Year1 would otherwise get ticks such as 2012.5)
-integer_axes <- c("Year1")
+# Axes labelled in whole years every 2 (time would otherwise get ticks such as 2012.5)
+integer_axes <- c("Year1", "Survey_date")
 
 # Functions ---------------------------------------------------------------
 # Fallback for a missing (NA) lookup value
