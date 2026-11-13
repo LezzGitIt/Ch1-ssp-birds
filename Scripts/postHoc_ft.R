@@ -12,26 +12,24 @@ ggplot2::theme_set(cowplot::theme_cowplot())
 # postHocLM samples its posterior, so a fixed seed keeps the saved summary reproducible
 set.seed(20261105)
 
-## Ch1 trait table built in the sibling Fd-pd repo (01_Ch1_traits.R): the deposit traits plus eye size, BirdLife clutch, nest and incubation traits
+## Ch1 trait table built in the sibling Fd-pd repo (01_Ch1_traits.R): the deposit traits plus eye size, BirdLife clutch, nest and incubation traits, and Forest_specialization (1/rank-weighted wooded share of BIRDBASE habitat ranks, which replaced the AVONET-based Forest_bin)
 Ft <- read_csv("../Fd-pd/Derived/Functional_traits_ch1.csv")
 
 # Occupancy model output
 Occ_mod_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_prec_nofarm_long_2026-10-31.rds"
 Occ_mod <- readRDS(Occ_mod_path)
 
-# Forest or non-forest? ---------------------------------------------------
-Forest <- FALSE
-if(Forest){
-  variable_posthoc <- "Year1"
-} else{
-  variable_posthoc <- "HabitatSsp"
-  } 
+# Contrasts ---------------------------------------------------------------
+# Species' habitat effects regressed on traits: silvopasture vs pasture (the HabitatSsp coefficient) and silvopasture vs forest (HabitatSsp minus HabitatBosque within each draw, the contrast a refit with forest as the reference would estimate, up to the community prior)
+contrasts <- c("Ssp_vs_pasture", "Ssp_vs_forest")
 
 # Format ------------------------------------------------------------------
 # Rows correspond to the posterior MCMC samples and the columns correspond to species
-y_draws <- as_draws_df(Occ_mod$beta.samples) %>% 
-  select(starts_with(paste0(variable_posthoc, "-"))) %>% 
-  rename_with(~str_remove(., paste0(variable_posthoc, "-")))
+beta_draws <- as.data.frame(as.matrix(Occ_mod$beta.samples))
+species_draws <- function(term) beta_draws %>% select(starts_with(paste0(term, "-"))) %>% rename_with(~str_remove(., paste0(term, "-")))
+y_draws_l <- list(Ssp_vs_pasture = species_draws("HabitatSsp"), Ssp_vs_forest = species_draws("HabitatSsp") - species_draws("HabitatBosque"))[contrasts]
+# Species order (and the threatened-species section) from the silvopasture vs pasture draws
+y_draws <- y_draws_l$Ssp_vs_pasture
 
 # >PCA --------------------------------------------------------------------
 # PCA of bill morph
@@ -101,7 +99,7 @@ postHoc_l_eye <- list(y = y_draws_eye, covs = Ft_eye)
 
 # >Life-history -----------------------------------------------------------
 covariates_lh <- c("Habitat.Density", "Migration_avo", "Trophic.Level", "Gen_length")
-covariates_specialization <- c("Elev_range", "Range.Size", "Forest_bin", "Habitat_breadth", "Diet_breadth") # "Ecological_specialization"
+covariates_specialization <- c("Elev_range", "Range.Size", "Forest_specialization", "Habitat_breadth", "Diet_breadth") # "Ecological_specialization"
 Ft_lh <- Ft_spp %>% 
   select(Species_ayerbe, all_of(c(covariates_lh, covariates_specialization))) %>%
   # Residents are the reference, so the migration coefficients compare long-distance and partial migrants with resident species
@@ -162,49 +160,31 @@ Ft_spp %>%
   GGally::ggcorr(label = T, label_size = 2, label_round = 2, hjust = 0.75, size = 3, layout.exp = 1.01)
 
 # Run model ---------------------------------------------------------------
-## Morphology models
+## One trait model per group of traits; each data list pairs a trait table with the occupancy-draw columns of its species
 # Morph variables: Mass + HWI + Tarsus.Length + Tail.Length + Beak_size + Beak_shape
 Morph_form <- as.formula(paste("~" , paste(covariates_morph, collapse = " + ")))
-postHoc_morph <- postHocLM(formula = Morph_form , data = postHoc_l_morph)
-# Residual eye size
-postHoc_eye <- postHocLM(formula = ~Eye_resid, data = postHoc_l_eye)
-
-## Life-history models
 # Lh vars: Range.Size + Elev_range + Habitat.Density + Migration + Trophic.Level
 lh_form <- as.formula(paste("~" , paste(covariates_lh, collapse = " + ")))
-postHoc_lh <- postHocLM(formula = lh_form, data = postHoc_l_lh)
-
-# Specialization
 specialization_form <- as.formula(paste("~" , paste(covariates_specialization, collapse = " + ")))
-postHoc_specialization <- postHocLM(formula = specialization_form, data = postHoc_l_lh)
-
-# Clutch
-postHoc_clutch <- postHocLM(formula = ~Clutch_mean, data = postHoc_l_clutch)
-
-## Nesting 
 Nesting_form <- as.formula(paste("~" , paste(covariates_nest_loc, collapse = " + ")))
-postHoc_nesting <- postHocLM(formula = Nesting_form , data = postHoc_l_nesting)
-# Nest exposure
-postHoc_nest_exp <- postHocLM(formula = ~Nest_exposure, data = postHoc_l_nest_exp)
+postHoc_forms <- list(Morphology = Morph_form, Eye_size = ~Eye_resid, Life_history = lh_form, Specialization = specialization_form, Clutch_size = ~Clutch_mean, Nest_location = Nesting_form, Nest_exposure = ~Nest_exposure)
+postHoc_data <- list(Morphology = postHoc_l_morph, Eye_size = postHoc_l_eye, Life_history = postHoc_l_lh, Specialization = postHoc_l_lh, Clutch_size = postHoc_l_clutch, Nest_location = postHoc_l_nesting, Nest_exposure = postHoc_l_nest_exp)
+# postHocLM pairs trait rows with occupancy-draw columns by position, so the species must match in the same order
+iwalk(postHoc_data, \(d, nm) if (!identical(str_replace(as.character(d$covs$Species_ayerbe), " ", "_"), colnames(d$y))) stop(nm, ": trait-table species do not match the occupancy-draw columns"))
+
+## Every model for each contrast, swapping in that contrast's draws for the same species
+postHoc_fits <- map(y_draws_l, \(y_contrast) imap(postHoc_data, \(d, nm) postHocLM(formula = postHoc_forms[[nm]], data = list(y = y_contrast[, colnames(d$y)], covs = d$covs))))
 
 # Plot --------------------------------------------------------------------
 # Formatting function
 format.for.plotting <- function(samples){
   samples %>% as_draws_df() %>%
-    #rename_with(~str_remove(., "Habitat")) %>%
     pivot_longer(cols = everything(), names_to = "param", values_to = "value") %>%
     mutate(param = as.factor(param))
 }
 
-# Number of species included
-N_spp <- length(Occ_mod$sp.names)
-N_spp_eye <- nrow(Ft_eye)
-N_spp_clutch <- nrow(Ft_clutch)
-N_spp_nest <- nrow(Ft_nesting)
-N_spp_nest_exp <- nrow(Ft_nest_exp)
-
 # Plot posteriors function
-plot_half_eye <- function(df, y_var, N_species = N_spp, Intercept = FALSE){
+plot_half_eye <- function(df, y_var, N_species = length(Occ_mod$sp.names), Intercept = FALSE){
   if(isFALSE(Intercept)) {df <-  df %>% filter(param != "(Intercept)") }
   df %>% filter(!str_detect({{ y_var }}, "^\\.")) %>% # rm .iteration, .draw, and .chain
     ggplot(aes(x = value, y = {{ y_var }}, fill = {{ y_var }})) +
@@ -214,39 +194,23 @@ plot_half_eye <- function(df, y_var, N_species = N_spp, Intercept = FALSE){
     guides(fill = "none")
 }
 
-## Morphology
-format.for.plotting(postHoc_morph$beta.samples) %>% plot_half_eye(y_var = param) 
-# Residual eye 
-format.for.plotting(postHoc_eye$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_eye)
-
-## Life-history
-format.for.plotting(postHoc_lh$beta.samples) %>% plot_half_eye(y_var = param)
-# Specialization
-format.for.plotting(postHoc_specialization$beta.samples) %>%
-  #filter(param != "Diet_breadth") %>%
-  plot_half_eye(y_var = param)
-# Nesting
-format.for.plotting(postHoc_nesting$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_nest)
-format.for.plotting(postHoc_nest_exp$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_nest_exp)
-# Clutch size
-format.for.plotting(postHoc_clutch$beta.samples) %>% plot_half_eye(y_var = param, N_species = N_spp_clutch)
+## Posterior of every coefficient, one plot per contrast x model
+iwalk(postHoc_fits, \(fits, contrast) iwalk(fits, \(fit, nm) {
+  print(format.for.plotting(fit$beta.samples) %>% plot_half_eye(y_var = param, N_species = nrow(postHoc_data[[nm]]$covs)) + labs(subtitle = paste(contrast, nm, sep = ": ")))
+}))
 
 # Save summary ------------------------------------------------------------
-# One row per trait-model coefficient (posterior mean, 95% CrI, P(>0)) with the number of species and the median Bayesian R2, read by the progress report; the file name carries the occupancy fit's name so a summary is never attributed to another fit
-postHoc_fits <- list(Morphology = postHoc_morph, Eye_size = postHoc_eye, Life_history = postHoc_lh, Specialization = postHoc_specialization, Clutch_size = postHoc_clutch, Nest_location = postHoc_nesting, Nest_exposure = postHoc_nest_exp)
-postHoc_data <- list(Morphology = postHoc_l_morph, Eye_size = postHoc_l_eye, Life_history = postHoc_l_lh, Specialization = postHoc_l_lh, Clutch_size = postHoc_l_clutch, Nest_location = postHoc_l_nesting, Nest_exposure = postHoc_l_nest_exp)
-# postHocLM pairs trait rows with occupancy-draw columns by position, so the species must match in the same order
-iwalk(postHoc_data, \(d, nm) if (!identical(str_replace(as.character(d$covs$Species_ayerbe), " ", "_"), colnames(d$y))) stop(nm, ": trait-table species do not match the occupancy-draw columns"))
-postHoc_summary <- imap(postHoc_fits, \(fit, nm) {
+# One row per contrast x trait-model coefficient (posterior mean, 95% CrI, P(>0)) with the number of species and the median Bayesian R2, read by the progress report; the file name carries the occupancy fit's name so a summary is never attributed to another fit
+postHoc_summary <- imap(postHoc_fits, \(fits, contrast) imap(fits, \(fit, nm) {
   b <- as.matrix(fit$beta.samples)
   # Trait = the trait-table column each coefficient comes from (a categorical trait gives one coefficient per non-reference level)
   traits <- setdiff(names(postHoc_data[[nm]]$covs), "Species_ayerbe")
   trait_of <- map_chr(colnames(b), \(term) { hits <- traits[startsWith(term, traits)]; if (length(hits) == 0) NA_character_ else hits[which.max(nchar(hits))] })
-  tibble(Model = nm, Trait = trait_of, Term = colnames(b), Mean = colMeans(b), Lower = apply(b, 2, quantile, 0.025), Upper = apply(b, 2, quantile, 0.975), P_positive = colMeans(b > 0), N_species = nrow(postHoc_data[[nm]]$covs), Bayes_R2 = median(as.numeric(fit$bayes.R2)))
-}) %>%
+  tibble(Contrast = contrast, Model = nm, Trait = trait_of, Term = colnames(b), Mean = colMeans(b), Lower = apply(b, 2, quantile, 0.025), Upper = apply(b, 2, quantile, 0.975), P_positive = colMeans(b > 0), N_species = nrow(postHoc_data[[nm]]$covs), Bayes_R2 = median(as.numeric(fit$bayes.R2)))
+}) %>% list_rbind()) %>%
   list_rbind() %>%
   mutate(across(c(Mean, Lower, Upper, P_positive, Bayes_R2), \(x) round(x, 3)))
-write_csv(postHoc_summary, paste0("Derived/Excels/postHoc_", variable_posthoc, "_", sub("\\.rds$", "", basename(Occ_mod_path)), ".csv"))
+write_csv(postHoc_summary, paste0("Derived/Excels/postHoc_traits_", sub("\\.rds$", "", basename(Occ_mod_path)), ".csv"))
 
 # Inspect Threatened species ------------------------------------------------------
 tibble(Species_ayerbe = str_replace(names(y_draws), "_", " "), 
@@ -268,10 +232,8 @@ N_det <- apply(Occ_mod$y, 1, sum, na.rm = TRUE)
 N_det_te <- tibble(Species_ayerbe = Spp_te$Species_ayerbe_, N = N_det[Spp_te$Species_ayerbe_])
 arrange(N_det_te, N)
 
-# Plot, with each species' N to the right of the panel
-as_draws_df(Occ_mod$beta.samples) %>% 
-  select(starts_with(paste0(variable_posthoc, "-"))) %>% 
-  rename_with(~str_remove(., paste0(variable_posthoc, "-"))) %>%
+# Plot of their silvopasture vs pasture effects, with each species' N to the right of the panel
+y_draws %>%
   select(Spp_te$Species_ayerbe_) %>%
   pivot_longer(cols = everything(), 
                names_to = "Species_ayerbe", 
