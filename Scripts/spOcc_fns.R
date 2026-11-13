@@ -189,9 +189,26 @@ fill_nearest_period <- function(m) {
   t(apply(m, 1, function(r) { obs <- which(!is.na(r)); r[sapply(seq_along(r), function(t) obs[which.min(abs(obs - t))])] }))
 }
 
+# Lay out one value per surveyed location-period as the site x period matrix of a multi-season data list, then fill the unsurveyed cells: "nearest" with the location's value from its nearest surveyed period (time-varying site covariates), "period_mean" with the mean of the period (covariates that describe the period, e.g. survey date)
+site_period_matrix <- function(value, site, period, site_levels, time_levels, fill = c("nearest", "period_mean")) {
+  fill <- match.arg(fill)
+  cell <- cbind(match(site, site_levels), match(period, time_levels))
+  stopifnot(!anyNA(cell), !anyDuplicated(cell))
+  m <- matrix(NA_real_, length(site_levels), length(time_levels), dimnames = list(site_levels, time_levels))
+  m[cell] <- value
+  if (fill == "nearest") return(fill_nearest_period(m))
+  ifelse(is.na(m), matrix(colMeans(m, na.rm = TRUE), nrow(m), ncol(m), byrow = TRUE), m)
+}
+
 # Mean survey date (decimal years) of each location-period, from a visit-level table with a Date column; occupancy covariates must be constant within a location-period, hence the mean
 survey_dates <- function(event_covs, by = c("Id_survey", "Year_grp", "Season")) {
   dplyr::summarise(event_covs, Survey_date = lubridate::decimal_date(mean(as.Date(Date))), .by = dplyr::all_of(by))
+}
+
+# Hinge coding of distance to the forest edge: dist_m is signed distance in metres (negative inside forest), is_forest whether each point is a forest point (same shape); returns Dist_open (distance outside forest, 0 at forest points) and Dist_inside (depth inside forest, 0 at pasture and silvopasture points)
+# Assigned by habitat rather than by sign and clipped at 0, because forest points up to 40 m outside the mapped edge and silvopasture points up to 7 m inside it are digitising tolerance; divided by dist_sd without centring, so 0 stays 'at the edge'
+hinge_distance <- function(dist_m, is_forest, dist_sd) {
+  list(Dist_open = ifelse(is_forest, 0, pmax(dist_m, 0)) / dist_sd, Dist_inside = ifelse(is_forest, pmax(-dist_m, 0), 0) / dist_sd)
 }
 
 # Fit one multi-season multi-species occupancy model (spOccupancy::svcTMsPGOcc with a spatially varying intercept only, or spOccupancy::tMsPGOcc when spatial = FALSE) and save it with a fit summary beside it; each call is independent, so a crashed or cached fit never affects another
