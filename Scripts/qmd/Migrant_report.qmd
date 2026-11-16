@@ -57,6 +57,12 @@ ring_loadings_csv <- "Derived/Excels/Migrant_ms_ring_spatial_loadings.csv"
 # Non-spatial check of the community radius (2026-11-15 night): location random effect in place of the spatial factor, with and without canopy
 ms_nonsp_tag <- "oct15_team_day_fref_nonsp_ig11"
 ms_ring_nonsp_tag <- paste0("oct15_team_day_fref_r", comm_radius, "_nonsp_ig11")
+# Migrants outside Meta (user, 2026-11-16): in-season point counts from all ecoregions in the sibling wrangling repository, and AVONET long-distance migrants from its trait table
+wrangling_dir <- "../Ssp-bird-data-wrangling/Derived/Excels/"
+# AVONET long-distance migrants that are not Nearctic-Neotropical migrants in Colombia (resident or austral-migrant populations, or breeding only in Middle America), excluded as for the Meta migrant list
+not_nearctic <- c("Chrysolampis mosquitus", "Coccyzus lansbergi", "Elaenia pallatangae", "Empidonomus varius", "Falco sparverius", "Myiodynastes maculatus", "Myiopagis viridicata", "Pyrocephalus rubinus", "Tyrannus savana", "Vireo flavoviridis")
+# Species whose Colombian records may include resident populations (marked in the table)
+mixed_status <- c("Setophaga petechia", "Vireo olivaceus")
 # The tag must be followed directly by the fit date, so e.g. "fref_free" does not also match "fref_free_short"
 fit_path <- \(sp, tag) list.files(fit_dir, paste0("^Occ_mod_", sp, "_", tag, "_\\d{4}-\\d{2}-\\d{2}\\.rds$"), full.names = TRUE)
 stopifnot(all(imap_int(ss_tags, \(tag, sp) length(fit_path(sp, tag))) == 1), all(map_int(c(ss_tag, striata_nc_arr_tag), \(tag) length(fit_path("Setophaga_striata", tag))) == 1), all(map_int(c(ms_tag, ms_day_tag, ms_nc_tag, ms_nonsp_tag, ms_ring_nonsp_tag), \(tag) length(fit_path("10_boreal_migrants", tag))) == 1))
@@ -321,7 +327,44 @@ nonsp_dwaic <- spOccupancy::waicOcc(ms_nonsp, by.sp = FALSE)[["WAIC"]] - spOccup
 ## Correlation of the 20 km ring with the 10 km ring over the surveyed location-periods
 r_20_10 <- cor(Ring_rows$Canopy_cover_ring[Ring_rows$Radius_m == 20000], Ring_rows$Canopy_cover_ring[Ring_rows$Radius_m == 10000])
 
+## Migrants outside Meta: in-season visits (same Julian-day window as Meta) by ecoregion and habitat, and visits with a detection of each Nearctic-Neotropical migrant; a visit is one point count (location, date, start time)
+hab_short <- c(Bosque = "forest", Ssp = "silvopasture", Pastizales = "pasture")
+eco_label <- c(Piedemonte = "Meta (Piedemonte)", `Bajo magdalena` = "Bajo Magdalena", `Cordillera oriental` = "Cordillera Oriental", `Eje cafetero` = "Eje Cafetero", `Rio cesar` = "Río Cesar")
+visits_all <- read_csv(paste0(wrangling_dir, "Event_covs.csv"), show_col_types = FALSE) %>%
+  filter(Julian_day >= Season_start | Julian_day <= Season_end) %>%
+  distinct(Id_survey, Date, Pc_start, Id_survey_no_dc) %>%
+  left_join(distinct(read_csv(Site_covs_path, show_col_types = FALSE), Id_survey_no_dc, Ecoregion, Habitat), by = "Id_survey_no_dc") %>%
+  filter(Habitat %in% names(hab_short))
+long_distance <- read_csv(paste0(wrangling_dir, "Traits/Functional_traits.csv"), show_col_types = FALSE) %>%
+  filter(Migration_avo == "Long_distance", !Species_ayerbe %in% not_nearctic) %>%
+  pull(Species_ayerbe)
+migrant_visits <- read_csv(paste0(wrangling_dir, "Bird_pcs/Bird_pcs_all.csv"), show_col_types = FALSE) %>%
+  filter(Species_ayerbe %in% long_distance) %>%
+  distinct(Species_ayerbe, Id_survey, Date, Pc_start) %>%
+  inner_join(visits_all, by = c("Id_survey", "Date", "Pc_start"))
+# One row per species: visits with a detection in Meta, outside Meta by habitat (forest / silvopasture / pasture, as in Table 1), and the ecoregions outside Meta where it was recorded
+fsp_cell <- \(hab) paste(map_int(names(hab_short), \(h) sum(hab == h)), collapse = " / ")
+outside_tbl <- migrant_visits %>%
+  summarise(Meta = sum(Ecoregion == "Piedemonte"), Outside = sum(Ecoregion != "Piedemonte"), Habitats = fsp_cell(Habitat[Ecoregion != "Piedemonte"]),
+            Ecoregions = paste(map_chr(names(sort(table(Ecoregion[Ecoregion != "Piedemonte"]), decreasing = TRUE)), \(e) paste0(eco_label[[e]], " (", sum(Ecoregion == e), ")")), collapse = ", "),
+            .by = Species_ayerbe) %>%
+  filter(Outside >= 2) %>%
+  arrange(desc(Outside)) %>%
+  mutate(Mixed = Species_ayerbe %in% mixed_status, Modelled = str_replace(Species_ayerbe, " ", "_") %in% Migrants)
+# Survey effort: in-season point-count visits per ecoregion and habitat
+effort_tbl <- visits_all %>% count(Ecoregion, Habitat) %>%
+  mutate(Habitat = str_to_sentence(hab_short[Habitat]), Ecoregion = factor(eco_label[Ecoregion], eco_label)) %>%
+  pivot_wider(names_from = Habitat, values_from = n, values_fill = 0) %>%
+  arrange(Ecoregion) %>%
+  select(Ecoregion, Forest, Silvopasture, Pasture)
+# Text: share of detections outside Meta that were in forest, and in-season silvopasture and pasture visits outside Meta
+out_det <- filter(migrant_visits, Ecoregion != "Piedemonte")
+out_forest <- c(forest = sum(out_det$Habitat == "Bosque"), all = nrow(out_det))
+out_effort <- table(filter(visits_all, Ecoregion != "Piedemonte")$Habitat)
+
 # Captions with computed values (a colon inside an inline !expr would break the chunk-option YAML)
+outside_cap <- paste0("Nearctic-Neotropical migrants (AVONET long-distance migrants, excluding species with resident or austral-migrant populations in Colombia) recorded in at least 2 in-season point-count visits outside Meta: number of visits with a detection in Meta, outside Meta by habitat, and per ecoregion outside Meta; rows are ordered by the number of visits with a detection outside Meta. Season window as in Meta (", season_start_date, " to ", season_end_date, "), although passage timing may differ in other regions. Survey effort is in @tbl-effort. Asterisk: species in the Meta multi-species model; dagger: Colombian records may include resident populations.")
+effort_cap <- paste0("Survey effort: in-season point-count visits (", season_start_date, " to ", season_end_date, ") per ecoregion and habitat, all species combined.")
 ring_cap <- paste0("Scale of effect of landscape canopy cover (ring around each point, inner 50 m excluded). Top: WAIC of the model with canopy in a ring of that outer radius minus WAIC of the same model without canopy (below 0, the ring improves the model). Bottom: canopy coefficient (logit scale, per 10 percentage points of ring cover; posterior median and 95% CrI), the community-level mean for the multi-species model ('Community'). Single- and multi-species fits with ", format(n_iter_short, big.mark = ",", scientific = FALSE), "-iteration chains.")
 cond_text <- "in 2025-26 after arrival, other covariates at their means, spatial random effect at zero"
 # The rainfall fits still include day of season, held at the 2025-26 mean
@@ -464,13 +507,17 @@ For the community, WAIC improved most at `r ring_km(ring_best("Community")$Radiu
 
 **Live fences vs dispersed trees.** Splitting silvopasture into live fences (`r sum(ss_l$occ.covs$Habitat_split == "Live_fence")` locations within the season window) and dispersed trees (`r sum(ss_l$occ.covs$Habitat_split == "Dispersed_trees")`) asks more than the migrant data can answer: the among-species variance of the dispersed-trees effect did not converge (Rhat `r sprintf("%.2f", ms_split$rhat$tau.sq.beta[colnames(ms_split$tau.sq.beta.samples) == "Habitat_splitDispersed_trees"])`), and WAIC did not change (`r sprintf("%.1f", waic[["split"]])`). *S. striata* tended to use dispersed trees more than live fences (live fence minus dispersed trees `r est(lf_minus_dt(ms_split, "Setophaga_striata"))`), which fits its higher use with more silvopasture cover nearby, since dispersed-tree points have more silvopasture cover within 300 m than live-fence points (mean `r ssp_by_sub[["Dispersed_trees"]]`% vs `r ssp_by_sub[["Live_fence"]]`% over surveyed location-periods). The split is better tested in the 98-species model.
 
+## Nearctic-Neotropical migrants outside Meta
+
+Extending the models to other regions would add few detections outside forest. Within the same season window, the other ecoregions have `r out_effort[["Ssp"]]` silvopasture and `r out_effort[["Pastizales"]]` pasture visits, against `r out_effort[["Bosque"]]` in forest, and `r out_forest[["forest"]]` of the `r out_forest[["all"]]` visits with a Nearctic-Neotropical migrant outside Meta were in forest (@tbl-outside; survey effort in @tbl-effort). The main gains would be *Setophaga fusca*, an Andean winterer detected mostly in Eje Cafetero forest, and more forest data for *P. rubra* and *C. ustulatus*; *S. striata* was not recorded outside Meta in season.
+
 ## Next steps
 
 - Check the season window against eBird arrival and departure dates in Meta.
 - Test closure: does detection on a visit depend on the days since the previous visit to the same location-period?
 - Season-specific rainfall from CHIRPS (Climate Hazards Group InfraRed Precipitation with Station data; free, daily to monthly, about 5 km resolution) to test whether *S. striata* shifts habitat in drier years.
 
-## Supplementary figures
+## Supplementary figures and tables
 
 ```{r}
 #| label: fig-rain-ss
@@ -491,4 +538,29 @@ ss_plot(dist_tbl, dist_points, "Distance to forest edge (m; negative = inside fo
 #| fig-cap: !expr ssp_cap
 #| fig-height: 3.6
 ss_plot(ssp_tbl, ssp_points, "Silvopasture cover within 300 m (%)")
+```
+
+```{r}
+#| label: tbl-outside
+#| tbl-cap: !expr outside_cap
+# PDF: alternate row shading, and widths that keep each species name and the habitat header on one line; Word: plain table
+latex <- knitr::is_latex_output()
+outside_cols <- c("Species", "Meta", if (latex) kableExtra::linebreak("Outside Meta by habitat\n(forest / silvopasture / pasture)", align = "c") else "Outside Meta by habitat (forest / silvopasture / pasture)", "Ecoregions outside Meta (visits)")
+# Species names with their marks, in LaTeX or markdown
+outside_show <- outside_tbl %>%
+  mutate(Species = if (latex) paste0("\\textit{", Species_ayerbe, "}", if_else(Mixed, "\\textsuperscript{\\dag}", ""), if_else(Modelled, "*", "")) else paste0("*", Species_ayerbe, "*", if_else(Mixed, "^†^", ""), if_else(Modelled, "\\*", ""))) %>%
+  select(Species, Meta, Habitats, Ecoregions)
+if (latex) {
+  kable(outside_show, format = "latex", booktabs = TRUE, escape = FALSE, linesep = "", align = "lccl", col.names = outside_cols) %>%
+    kableExtra::kable_styling(latex_options = "striped", font_size = 9) %>%
+    kableExtra::column_spec(1, width = "3.5cm") %>%
+    kableExtra::column_spec(3, width = "4.4cm") %>%
+    kableExtra::column_spec(4, width = "5.8cm")
+} else kable(outside_show, col.names = outside_cols)
+```
+
+```{r}
+#| label: tbl-effort
+#| tbl-cap: !expr effort_cap
+kable(effort_tbl)
 ```
