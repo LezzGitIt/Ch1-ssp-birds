@@ -57,7 +57,7 @@ fig_paths <- c(
   map_inset = "Figures/Map_sampling/Map_sampling_meta_inset.png",
   map_legend = "Figures/Map_sampling/Map_sampling_meta_legend.png",
   habitat = "Figures/Marginal_effects/marginal_temporal_split_hinge_f2_habitat_split.png",
-  # Interaction figures from the marginal-effects panel run copy, one per goal: context (precipitation, distance), time, silvopasture cover within 300 m
+  # Interaction figures from the marginal-effects script, one per goal: context (precipitation, distance), time, silvopasture cover within 300 m
   context = "Figures/Marginal_effects/marginal_context_panel.png",
   time = "Figures/Marginal_effects/marginal_time_panel.png",
   ssp_cover = "Figures/Marginal_effects/marginal_ssp_cover_panel.png",

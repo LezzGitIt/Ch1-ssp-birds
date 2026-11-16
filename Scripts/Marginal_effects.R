@@ -13,17 +13,23 @@ source("Scripts/spOcc_fns.R")
 # Configuration -----------------------------------------------------------
 # Stacked list the multi-season fits were built from (spOccupancy_temporal.R)
 msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds"
-# Landscape-metrics table (survey ID to location code) and the wrangling repo's site table (silvopasture type per location), for Habitat_split
+# Landscape-metrics table (forest cover within 300 m; survey ID to location code) and the wrangling repo's site table (silvopasture type per location), for Forest_300 and Habitat_split
 Lsm_path <- "../Farm_diversity/Derived/Excels/Event_covs_lsm.csv"
 Site_covs_path <- "../Ssp-bird-data-wrangling/Derived/Excels/Site_covs.csv"
 
 ## One figure per row: the fitted model, a short tag for the file name, and the focal variables. Either focal variable can be NA: no focal_cat gives one curve along focal_cont; no focal_cont gives a point + interval per level. Whether the two interact is decided by the loaded model's formula, not here. Every row must be fitted to the data list above
 # focal_cat can be Habitat or Habitat_split (silvopasture split into live fence and dispersed trees) for fits with that term
-# Primary model with silvopasture split by type (Multi_spp_100 row 126)
+# The hinge-coded model set (spOccupancy_temporal.R): one habitat interaction per model, precipitation from the primary model (Multi_spp_100 row 107), time (row 109), silvopasture cover within 300 m (row 111), and the primary model with silvopasture split by type (row 126); the distance interaction (row 108) is drawn in its own section below
 plot_specs <- tribble(
   ~model_tag,                ~Occ_mod_path,                                                                          ~focal_cont, ~focal_cat,
+  "temporal_prec_hinge_f2",  "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_hinge_f2_inits_2026-11-08.rds",  "Tot_prec",  "Habitat",
+  "temporal_year_hinge_f2",  "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_year_hinge_f2_inits_2026-11-08.rds",  "Year1",     "Habitat",
+  "temporal_hab_ssp_f2",     "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_hab_ssp_f2_inits_2026-11-09.rds",     "ssp",       "Habitat",
   "temporal_split_hinge_f2", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_split_hinge_f2_inits_2026-11-15.rds", NA,          "Habitat_split"
 )
+# Distance interaction model (hinge-coded, with a silvopasture-specific slope outside forest)
+Dist_mod_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_dist_hinge_f2_inits_2026-11-08.rds"
+Dist_model_tag <- "temporal_dist_hinge_f2_inits"
 
 response <- "occupancy" # "occupancy" or "detection"
 # Draw each categorical level in its own panel (with that level's species curves) rather than overlaid in one panel
@@ -38,8 +44,8 @@ show_caption <- FALSE
 pred_n <- 200
 ci_level <- 0.95
 # Optional override of the default value of any non-focal covariate, on the model's (scaled) scale, e.g. list(Year1 = 0, Habitat = "Ssp")
-# Hinge-coded fits: distance terms at the forest edge, where the habitat contrasts are defined
-fixed_vals <- list(Dist_open = 0, Dist_inside = 0)
+# Hinge-coded fits: distance terms at the forest edge, where the habitat contrasts are defined; forest cover within 300 m at its mean
+fixed_vals <- list(Dist_open = 0, Dist_inside = 0, Forest_300 = 0)
 
 # Display names and colours (same palette as the NMDS figure)
 level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Live_fence = "Live fence", Dispersed_trees = "Dispersed trees", Bosque = "Forest", N = "Not in forest", Y = "In forest")
@@ -203,6 +209,8 @@ make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, c
   out_file <- paste0("Figures/Marginal_effects/marginal_", paste(c(model_tag, tolower(c(focal_cat, focal_cont))), collapse = "_"), if (settings$facet_by_cat) "_facet" else "", ".png")
   ggsave(out_file, marginal_plot, width = 8, height = 5.5, bg = "white")
   print(marginal_plot)
+  # The returned plot keeps this function's environment, so drop the fit and prediction array, or every kept plot holds its ~2 GB fit
+  rm(Occ_mod, coefs, pred_samples, X)
   invisible(marginal_plot)
 }
 
@@ -213,11 +221,17 @@ scaling <- read_csv(str_replace(msOcc_l_path, "\\.rds$", "_scaling.csv"), show_c
 covs <- list(occupancy = msOcc_l$occ.covs, detection = msOcc_l$det.covs)[[response]]
 if (is.null(covs)) stop("response must be 'occupancy' or 'detection'.")
 covs <- map(covs, \(x) if (is.data.frame(x) || is.matrix(x)) unlist(as.data.frame(x), use.names = FALSE) else x)
-# Occupancy terms the data list does not store: hinge-coded distance to the forest edge (Dist_open outside forest, Dist_inside inside it) and Habitat_split
+# Occupancy terms the data list does not store, built as in spOccupancy_temporal.R: hinge-coded distance to the forest edge (Dist_open outside forest, Dist_inside inside it), forest cover within 300 m and Habitat_split
 if (response == "occupancy") {
   Dist_scaling <- filter(scaling, Process == "occupancy", Covariate == "Dist_forest")
   covs[c("Dist_open", "Dist_inside")] <- hinge_distance(covs$Dist_forest * Dist_scaling$SD + Dist_scaling$Mean, covs$Habitat == "Bosque", Dist_scaling$SD)
   covs$Habitat_split <- split_habitat(covs$Habitat, covs$Id_survey, Lsm_path, Site_covs_path)
+  # Forest cover within 300 m, scaled over the surveyed location-periods as in the fits
+  Forest_raw <- tibble(Id_survey = as.character(covs$Id_survey), Year_grp = covs$Year_grp) %>%
+    left_join(distinct(read_csv(Lsm_path, show_col_types = FALSE), Id_survey, Year_grp, forest), by = c("Id_survey", "Year_grp"), relationship = "many-to-one") %>%
+    pull(forest)
+  stopifnot(!anyNA(Forest_raw))
+  covs$Forest_300 <- (Forest_raw - mean(Forest_raw)) / sd(Forest_raw)
 }
 
 # Plot --------------------------------------------------------------------
@@ -230,3 +244,58 @@ plot_settings <- list(
 marginal_plots <- pmap(plot_specs, \(model_tag, Occ_mod_path, focal_cont, focal_cat) {
   make_marginal_plot(Occ_mod_path, model_tag, if (is.na(focal_cont)) NULL else focal_cont, if (is.na(focal_cat)) NULL else focal_cat, covs, scaling, response, plot_settings)
 }) |> set_names(plot_specs$model_tag)
+
+# Distance to the forest edge ----
+### The distance interaction model's terms (Dist_open, Ssp_Dist_open, Dist_inside) do not map onto one covariate axis, so it is drawn here on one signed axis in metres (negative = inside forest): forest's curve comes from Dist_inside, pasture's and silvopasture's from Dist_open (+ Ssp_Dist_open), meeting at the edge; same conventions as make_marginal_plot() otherwise, non-distance covariates at their mean
+Dist_mod <- readRDS(Dist_mod_path)
+# Observed signed distance (m) per habitat, clipped at the edge as in the hinge terms
+Dist_obs <- tibble(Habitat = as.character(covs$Habitat), Dist_m = covs$Dist_forest * Dist_scaling$SD + Dist_scaling$Mean) %>%
+  mutate(Dist_m = if_else(Habitat == "Bosque", pmin(Dist_m, 0), pmax(Dist_m, 0)))
+dist_pred_df <- Dist_obs %>%
+  summarise(lo = min(Dist_m), hi = max(Dist_m), .by = Habitat) %>%
+  reframe(Dist_m = seq(lo, hi, length.out = pred_n), .by = Habitat) %>%
+  mutate(Dist_open = if_else(Habitat == "Bosque", 0, Dist_m / Dist_scaling$SD), Dist_inside = if_else(Habitat == "Bosque", -Dist_m / Dist_scaling$SD, 0))
+dist_cols <- dimnames(Dist_mod$X)[[3]]
+X_dist <- with(dist_pred_df, cbind(
+  "(Intercept)" = 1, HabitatSsp = Habitat == "Ssp", HabitatBosque = Habitat == "Bosque",
+  Dist_open = Dist_open, Ssp_Dist_open = Dist_open * (Habitat == "Ssp"), Dist_inside = Dist_inside,
+  Tot_prec = mean(covs$Tot_prec), ssp = mean(covs$ssp), Year1 = mean(covs$Year1)
+))
+stopifnot(setequal(colnames(X_dist), dist_cols))
+X_dist <- X_dist[, dist_cols]
+# Draws x grid rows x species, then the mean across species within each draw
+dist_samples <- vapply(Dist_mod$sp.names, \(sp) plogis(as.matrix(Dist_mod$beta.samples[, paste(dist_cols, sp, sep = "-")]) %*% t(X_dist)), matrix(0, nrow(Dist_mod$beta.samples), nrow(X_dist)))
+dist_quants <- apply(apply(dist_samples, c(1, 2), mean), 2, quantile, probs = c((1 - ci_level) / 2, 0.5, 1 - (1 - ci_level) / 2))
+dist_mean_df <- dist_pred_df %>%
+  mutate(low = dist_quants[1, ], mean = dist_quants[2, ], high = dist_quants[3, ], Habitat = factor(level_labels[Habitat], levels = c("Pasture", "Silvopasture", "Forest")))
+dist_caption <- sprintf("%s. Bold: mean across %d species, %g%% CrI, with no spatial effect; other covariates at their mean. Forest: depth inside forest (Dist_inside); pasture and silvopasture: distance from the forest edge (Dist_open, with a silvopasture-specific slope).", Dist_model_tag, length(Dist_mod$sp.names), 100 * ci_level)
+rm(Dist_mod, dist_samples); gc()
+marginal_dist <- ggplot(dist_mean_df, aes(x = Dist_m)) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_ribbon(aes(ymin = low, ymax = high, fill = Habitat), alpha = 0.25) +
+  geom_line(aes(y = mean, color = Habitat), linewidth = 1.2) +
+  scale_color_manual(values = level_colors, aesthetics = c("color", "fill")) +
+  annotate("text", x = c(-5, 5), y = Inf, label = c("inside forest", "outside forest"), hjust = c(1, 0), vjust = 1.5, size = 3.5, color = "grey40") +
+  labs(x = axis_labels["Dist_forest"], y = "Mean occupancy across species", color = NULL, fill = NULL, caption = if (show_caption) str_wrap(dist_caption, 110) else NULL) +
+  theme_bw() +
+  theme(plot.caption = element_text(hjust = 0))
+ggsave(paste0("Figures/Marginal_effects/marginal_", Dist_model_tag, "_habitat_dist_forest.png"), marginal_dist, width = 8, height = 5.5, bg = "white")
+print(marginal_dist)
+
+# Interaction figures ----
+### Multi-panel figures, one per question: context (precipitation and distance to the forest edge, side by side), time, and silvopasture cover within 300 m; short axis titles and the legend above the panels
+interaction_panels <- list(prec = marginal_plots$temporal_prec_hinge_f2 + labs(x = "Annual precipitation (mm)"), dist = marginal_dist + labs(x = "Distance to forest edge (m)", caption = NULL), time = marginal_plots$temporal_year_hinge_f2 + labs(x = "Year"), ssp_cover = marginal_plots$temporal_hab_ssp_f2 + labs(x = "Silvopasture within 300 m (%)")) %>%
+  map(\(p) p + theme(axis.title = element_text(size = 11), legend.position = "top"))
+## Context: precipitation and distance, with the y title on the left panel only and one shared legend
+shared_legend <- cowplot::get_plot_component(interaction_panels$prec, "guide-box-top")
+context_panels <- map(interaction_panels[c("prec", "dist")], \(p) p + theme(legend.position = "none"))
+context_panels$dist <- context_panels$dist + labs(y = NULL)
+context_grid <- patchwork::wrap_plots(context_panels, ncol = 2) + patchwork::plot_annotation(tag_levels = "a") & theme(plot.tag.location = "margin")
+context_fig <- cowplot::plot_grid(shared_legend, context_grid, ncol = 1, rel_heights = c(0.08, 1))
+ggsave("Figures/Marginal_effects/marginal_context_panel.png", context_fig, width = 9, height = 4.2, bg = "white")
+print(context_fig)
+## Time and silvopasture cover within 300 m, one panel each
+ggsave("Figures/Marginal_effects/marginal_time_panel.png", interaction_panels$time, width = 5.5, height = 4.5, bg = "white")
+print(interaction_panels$time)
+ggsave("Figures/Marginal_effects/marginal_ssp_cover_panel.png", interaction_panels$ssp_cover, width = 5.5, height = 4.5, bg = "white")
+print(interaction_panels$ssp_cover)
