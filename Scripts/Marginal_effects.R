@@ -8,16 +8,21 @@
 library(tidyverse)
 library(spOccupancy)
 ggplot2::theme_set(cowplot::theme_cowplot())
+source("Scripts/spOcc_fns.R")
 
 # Configuration -----------------------------------------------------------
 # Stacked list the multi-season fits were built from (spOccupancy_temporal.R)
-msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_278_hab_fix.rds"
+msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds"
+# Landscape-metrics table (survey ID to location code) and the wrangling repo's site table (silvopasture type per location), for Habitat_split
+Lsm_path <- "../Farm_diversity/Derived/Excels/Event_covs_lsm.csv"
+Site_covs_path <- "../Ssp-bird-data-wrangling/Derived/Excels/Site_covs.csv"
 
 ## One figure per row: the fitted model, a short tag for the file name, and the focal variables. Either focal variable can be NA: no focal_cat gives one curve along focal_cont; no focal_cont gives a point + interval per level. Whether the two interact is decided by the loaded model's formula, not here. Every row must be fitted to the data list above
-# 278-species primary model (multi-season spatial, no Farm_join; Meta_gradient row 78); the 98-species rows 86, 88, 89 used msOcc_l_meta_98_hab_fix_jit1cm.rds
+# focal_cat can be Habitat or Habitat_split (silvopasture split into live fence and dispersed trees) for fits with that term
+# Primary model with silvopasture split by type (Multi_spp_100 row 126)
 plot_specs <- tribble(
-  ~model_tag,          ~Occ_mod_path,                                    ~focal_cont,   ~focal_cat,
-  "temporal_prec_278", "Derived/Rdata/Model_output/Temporal/278.rds", "Tot_prec",    "Habitat"
+  ~model_tag,                ~Occ_mod_path,                                                                          ~focal_cont, ~focal_cat,
+  "temporal_split_hinge_f2", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_split_hinge_f2_inits_2026-11-15.rds", NA,          "Habitat_split"
 )
 
 response <- "occupancy" # "occupancy" or "detection"
@@ -28,16 +33,18 @@ show_species <- NULL
 # Predict focal_cont only across the values observed for each plotted level, and for the levels at which non-focal categorical covariates are held (e.g. no pasture points lie inside forest), rather than across the full range
 restrict_to_observed <- TRUE
 # In-figure caption giving the model tag and plotting conventions; FALSE for figures captioned elsewhere, e.g. in a report
-show_caption <- TRUE
+show_caption <- FALSE
 
 pred_n <- 200
 ci_level <- 0.95
 # Optional override of the default value of any non-focal covariate, on the model's (scaled) scale, e.g. list(Year1 = 0, Habitat = "Ssp")
-fixed_vals <- list()
+# Hinge-coded fits: distance terms at the forest edge, where the habitat contrasts are defined
+fixed_vals <- list(Dist_open = 0, Dist_inside = 0)
 
 # Display names and colours (same palette as the NMDS figure)
-level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Bosque = "Forest", N = "Not in forest", Y = "In forest")
-level_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", Forest = "#008300")
+level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Live_fence = "Live fence", Dispersed_trees = "Dispersed trees", Bosque = "Forest", N = "Not in forest", Y = "In forest")
+# The two silvopasture types as a light (live fence) and a dark (dispersed trees) shade of the silvopasture purple
+level_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", `Live fence` = "#a294f0", `Dispersed trees` = "#3d2a9e", Forest = "#008300")
 axis_labels <- c(
   Dist_forest = "Distance to forest edge (m; negative = inside forest)", Tot_prec = "Annual precipitation (mm)",
   Year1 = "Year", Survey_date = "Year", ssp = "Silvopasture within 300 m (%)", Canopy_cover = "Forest cover within 1 km (%)",
@@ -157,7 +164,8 @@ make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, c
   if (is.null(focal_cont)) {
     # Categorical focal variable alone: species as grey jittered points, community mean + credible interval per level in the level colour
     marginal_plot <- ggplot(mean_df, aes(x = .data[[x_var]], y = mean, color = .data[[x_var]]))
-    if (show_species) marginal_plot <- marginal_plot + geom_jitter(data = species_df, color = "grey40", alpha = 0.3, size = 0.8, width = 0.15, height = 0)
+    # Seeded jitter, so a rerun redraws the same figure
+    if (show_species) marginal_plot <- marginal_plot + geom_point(data = species_df, color = "grey40", alpha = 0.3, size = 0.8, position = position_jitter(width = 0.15, height = 0, seed = 20261107))
     marginal_plot <- marginal_plot +
       geom_pointrange(aes(ymin = low, ymax = high), linewidth = 1, size = 0.8) +
       scale_color_manual(values = plot_colors, guide = "none") +
@@ -205,6 +213,12 @@ scaling <- read_csv(str_replace(msOcc_l_path, "\\.rds$", "_scaling.csv"), show_c
 covs <- list(occupancy = msOcc_l$occ.covs, detection = msOcc_l$det.covs)[[response]]
 if (is.null(covs)) stop("response must be 'occupancy' or 'detection'.")
 covs <- map(covs, \(x) if (is.data.frame(x) || is.matrix(x)) unlist(as.data.frame(x), use.names = FALSE) else x)
+# Occupancy terms the data list does not store: hinge-coded distance to the forest edge (Dist_open outside forest, Dist_inside inside it) and Habitat_split
+if (response == "occupancy") {
+  Dist_scaling <- filter(scaling, Process == "occupancy", Covariate == "Dist_forest")
+  covs[c("Dist_open", "Dist_inside")] <- hinge_distance(covs$Dist_forest * Dist_scaling$SD + Dist_scaling$Mean, covs$Habitat == "Bosque", Dist_scaling$SD)
+  covs$Habitat_split <- split_habitat(covs$Habitat, covs$Id_survey, Lsm_path, Site_covs_path)
+}
 
 # Plot --------------------------------------------------------------------
 plot_settings <- list(

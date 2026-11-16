@@ -211,6 +211,20 @@ hinge_distance <- function(dist_m, is_forest, dist_sd) {
   list(Dist_open = ifelse(is_forest, 0, pmax(dist_m, 0)) / dist_sd, Dist_inside = ifelse(is_forest, pmax(-dist_m, 0), 0) / dist_sd)
 }
 
+# Habitat with silvopasture split into its two types, live fence and dispersed trees: habitat holds the Habitat labels (Pastizales / Ssp / Bosque) and id_survey the survey ID of each element (same length, e.g. the rows of a stacked data list); returns a factor with levels Pastizales, Live_fence, Dispersed_trees, Bosque
+# Each silvopasture point's type (Habitat_sub) comes from the wrangling repo's site table, keyed by location code, which the landscape-metrics table maps from survey IDs
+split_habitat <- function(habitat, id_survey, lsm_path, site_covs_path) {
+  location_codes <- dplyr::distinct(readr::read_csv(lsm_path, show_col_types = FALSE), Id_survey = as.character(Id_survey), Id_survey_no_dc)
+  types <- dplyr::distinct(readr::read_csv(site_covs_path, show_col_types = FALSE), Id_survey_no_dc, Habitat_sub)
+  habitat_sub <- dplyr::tibble(Id_survey = as.character(id_survey)) |>
+    dplyr::left_join(location_codes, by = "Id_survey", relationship = "many-to-one") |>
+    dplyr::left_join(types, by = "Id_survey_no_dc", relationship = "many-to-one") |>
+    dplyr::pull(Habitat_sub)
+  out <- factor(dplyr::case_when(habitat != "Ssp" ~ as.character(habitat), habitat_sub == "Cerca viva" ~ "Live_fence", habitat_sub == "Arboles dispersos" ~ "Dispersed_trees"), levels = c("Pastizales", "Live_fence", "Dispersed_trees", "Bosque"))
+  stopifnot(!anyNA(out))
+  out
+}
+
 # Fit one multi-season multi-species occupancy model (spOccupancy::svcTMsPGOcc with a spatially varying intercept only, or spOccupancy::tMsPGOcc when spatial = FALSE) and save it with a fit summary beside it; each call is independent, so a crashed or cached fit never affects another
 # settings: list with det.formula, priors, n.neighbors, n.factors, batch.length, ar1, mcmc (list of n.batch, n.burn, n.thin, n.chains), out_dir and optionally seed; mcmc, n_factors and seed override the settings for one call; seed is passed to set.seed() before sampling (NULL leaves the random state alone); inits is a list of extra starting values added to the z starting values, e.g. list(lambda = list(<species x factor matrix>)) to start the loadings from an earlier fit (spOccupancy uses the same loadings start in every chain, and redraws the other parameters' starts for chains 2+)
 fit_temporal <- function(data, occ.formula, tag, settings, mcmc = settings$mcmc, n_factors = settings$n.factors, seed = settings$seed, inits = NULL, spatial = TRUE, smoke = FALSE) {

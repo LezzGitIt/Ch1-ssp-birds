@@ -11,7 +11,7 @@ trymax_n <- 20
 # TRUE = full species-name text cloud (every species at/above species_min_sites sites, the
 # cluttered version); FALSE = drop that layer entirely and keep only the representative-species
 # photos/labels, for a cleaner presentation figure. Also controls the export filename below.
-show_species_labels <- TRUE
+show_species_labels <- FALSE
 # TRUE = every species as a small unlabelled cross at its NMDS position (photographed species larger, so each photo's line ends on a visible mark); crosses keep species apart from the round site points
 show_species_points <- TRUE
 
@@ -35,8 +35,10 @@ if(nmds_k == 3){
 }
 
 
-# Habitat palette, gold / violet / green, chosen 2026-11-07 because blue and green looked too similar; validated with the dataviz skill (all-pairs colour-blind separation 16, normal vision 30)
-habitat_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", Forest = "#008300")
+# Habitat grouping: "Habitat" (pasture / silvopasture / forest) or "Habitat_split" (silvopasture split into live fence and dispersed trees, for fits with that term), one ellipse per group
+habitat_var <- "Habitat_split"
+# Habitat palette, gold / violet / green, chosen 2026-11-07 because blue and green looked too similar; validated with the dataviz skill (all-pairs colour-blind separation 16, normal vision 30); the split shows the two silvopasture types as a light (live fence) and a dark (dispersed trees) shade of the silvopasture purple
+habitat_colors <- if (habitat_var == "Habitat_split") c(Pasture = "#eda100", `Live fence` = "#a294f0", `Dispersed trees` = "#3d2a9e", Forest = "#008300") else c(Pasture = "#eda100", Silvopasture = "#6250d6", Forest = "#008300")
 
 # Ellipse level - NULL = plain, unscaled SD ellipse (the standard "ellipses based on the SD of
 # point scores" convention - a dispersion marker, not a coverage claim; points falling outside
@@ -62,9 +64,9 @@ library(magick)
 
 # Load data -----------------------------------------------------------------
 # Fitted model and the data list it was fitted to (stacked msOcc_l_* or multi-season tmsOcc_l_*); model_tag names the cache, so a different model never reads another model's ordinations
-Occ_mod_path <- "Derived/Rdata/Model_output/Temporal/278.rds"
-data_l_path <- "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_278_hab_fix.rds"
-model_tag <- "temporal_prec_278"
+Occ_mod_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_split_hinge_f2_inits_2026-11-15.rds"
+data_l_path <- "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_98_hab_fix.rds"
+model_tag <- "temporal_split_hinge_f2_inits_98"
 Occ_mod <- readRDS(Occ_mod_path)
 data_l <- readRDS(data_l_path)
 
@@ -83,12 +85,20 @@ if (length(dim(Occ_mod$z.samples)) == 4) {
   site_meta <- data_l$occ.covs[, c("Id_survey", "Habitat")]
   z_draws <- Occ_mod$z.samples[draw_idx, , , drop = FALSE]
 }
+# Habitat_split: each location's silvopasture type, read from the fit's habitat dummies (the data list carries only Habitat); multi-season fits only
+if (habitat_var == "Habitat_split") {
+  stopifnot(length(dim(Occ_mod$X)) == 3)
+  split_cols <- paste0("Habitat_split", c("Live_fence", "Dispersed_trees", "Bosque"))
+  loc_split <- c("Pastizales", "Live_fence", "Dispersed_trees", "Bosque")[1 + apply(Occ_mod$X[, 1, split_cols], 1, \(r) if (any(r == 1)) which(r == 1) else 0)]
+  stopifnot(identical(loc_split %in% c("Live_fence", "Dispersed_trees"), as.character(data_l$occ.covs$Habitat) == "Ssp"))
+  site_meta$Habitat <- loc_split[match(site_meta$Id_survey, dimnames(data_l$y)[[2]])]
+}
 # This data is already Meta-department-only (Department == "Meta" for every row); just exclude Mosaic
 site_idx <- which(site_meta$Habitat != "Mosaic")
 site_meta <- site_meta[site_idx, ]
 z_draws <- z_draws[, , site_idx, drop = FALSE] # K x species x sites
 # Translate to English for the figure - recoded here (not just in the legend labels) so every downstream Habitat-grouped object (ellipses, species_candidates, etc.) already carries the English term, with nothing left keyed to the Spanish original.
-site_meta$Habitat <- recode(site_meta$Habitat, Pastizales = "Pasture", Ssp = "Silvopasture", Bosque = "Forest")
+site_meta$Habitat <- recode(site_meta$Habitat, Pastizales = "Pasture", Ssp = "Silvopasture", Live_fence = "Live fence", Dispersed_trees = "Dispersed trees", Bosque = "Forest")
 
 # Every draw's matrix has the same sites x species shape, in the same order, which is what makes the Procrustes alignment below valid. A site with no species in a draw (a valid posterior state, e.g. a pasture survey with no detections) is at Bray-Curtis 1 from every other site, but two empty sites in one draw give an undefined 0/0 distance
 empty_sites <- apply(z_draws, c(1, 3), sum) == 0
@@ -501,7 +511,7 @@ nmds_plot <- ggplot() +
     size = 2.6, color = "grey20", fontface = "italic",
     fill = "white", label.size = 0, label.padding = unit(0.15, "lines")
   ) +
-  scale_color_manual(values = habitat_colors) +
+  scale_color_manual(values = habitat_colors, breaks = names(habitat_colors)) +
   # clip = "off" lets photos/labels spill into the plot margins rather than being cut off at the
   # panel edge - paired with the wider plot.margin below, which gives them literal canvas space
   # to render into
