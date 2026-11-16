@@ -1,5 +1,5 @@
 ## PhD birds in silvopastoral landscapes ##
-# Occupancy of Nearctic-Neotropical migrants in Meta during the wintering season: single-species multi-season occupancy models for a focal migrant (Setophaga striata by default), with the primary model's occupancy structure (hinge distance, mean survey date) plus a day-of-season quadratic, and the primary detection structure without Prob_breed (a resident breeding-phenology covariate)
+# Occupancy of Nearctic-Neotropical migrants in Meta during the wintering season: single-species multi-season occupancy models for a focal migrant (Setophaga striata by default), with the primary model's occupancy structure (hinge distance, mean survey date) (the report's base models replace day of season with an arrival-period indicator, 2026-11-16), and the primary detection structure without Prob_breed (a resident breeding-phenology covariate)
 # Model family: Bernoulli occupancy and detection with logit links (stPGOcc: spatial intercept, NNGP exponential, 5 neighbours, effective-range prior set per fit variant (free, small, mid-range or extent-wide), no AR(1)), the single-species counterpart of the primary svcTMsPGOcc fit; seed 20261107
 # Visits outside the wintering season (before 15 October or after March; first Meta detection 8 October 2019, none in 439 visits from 23 September to 6 October 2019; no April surveys in Meta) are set to NA in y and the detection covariates, so occupancy means use of the location during the non-breeding season
 # Collector team enters detection as fixed effects (dummies), not a random effect: only 4 teams remain in season, too few to estimate a variance, and detection is identified from the repeat visits within each location-period even where a team covers a whole period
@@ -35,6 +35,12 @@ Ring_species <- c("Setophaga_striata", "Setophaga_ruticilla", "Piranga_rubra")
 ## Wintering season as Julian days (non-leap calendar; leap years shift by one day): 15 October (288) to 31 March (90); day of season counts from 15 October so the season does not wrap at the new year
 Season_start <- 288
 Season_end <- 90
+## End of arrival (user, 2026-11-16): 1 December (Julian 335), by when eBird Status and Trends shows S. striata's non-breeding distribution settled in South America (roughly 22 November, certainly by early December); location-periods with a mean date before it are flagged as arrival (Arrival = 1)
+Arrival_end <- 335
+## End of arrival for the multi-species model (2026-11-16): 1 November (Julian 305), when per-visit detection of any migrant in forest jumped (0.19 in 15-31 October 2016 vs 0.38-0.53 from November to mid-December), consistent with the earlier arrival of most migrants than S. striata; Arrival_nov1 = 1 before it
+Arrival_end_comm <- 305
+## Alternative end of arrival for the multi-species model (user, 2026-11-16): 15 November (Julian 319); unlike 1 November it puts the early-November 2019 location-periods (all habitats) in the arrival period, so the indicator varies outside forest; Arrival_nov15 = 1 before it
+Arrival_end_nov15 <- 319
 
 ## Day of season enters occupancy as the location-period mean (occupancy is constant within a location-period, whose visits are at most ~2 weeks apart), as a quadratic so occupancy can peak mid-season
 ## Rainfall: annual (Tot_prec, as the multi-species models) or driest-month rainfall (Driest_prec, WorldClim monthly normals; Morales-Rozo et al. 2025 found it supported, while December-March rainfall correlates 0.96 with annual rainfall in Meta)
@@ -62,6 +68,12 @@ Occ_formulas <- list(
 )
 ## fref plus landscape canopy cover in one ring (fref_r<radius>), every other term unchanged (user, 2026-11-15, as in the 98-species fits)
 Occ_formulas <- c(Occ_formulas, map(set_names(Ring_radii_m, paste0("fref_r", Ring_radii_m)), \(radius) update(Occ_formulas$fref, as.formula(paste0("~ . + Canopy_r", radius)))))
+## The base models without day of season (user, 2026-11-16, doubts the day-of-season curve): with period intercepts, day of season varies within periods mainly between October-December 2016 and March 2017 (forest only), which share the 2016-17 intercept
+Occ_formulas <- c(Occ_formulas, map(c(fref_noday = "fref", fref_r3000_noday = "fref_r3000", fref_r5000_noday = "fref_r5000"), \(occ) update(Occ_formulas[[occ]], ~ . - Day_season)))
+## The same with an arrival-period indicator in place of day of season (2026-11-16): within periods it contrasts October-November 2016 with early December 2016 and March 2017 (forest only), as all November 2019 location-periods fall before 1 December
+Occ_formulas <- c(Occ_formulas, map(c(fref_arr = "fref_noday", fref_r3000_arr = "fref_r3000_noday", fref_r5000_arr = "fref_r5000_noday"), \(occ) update(Occ_formulas[[occ]], ~ . + Arrival)))
+Occ_formulas$fref_r3000_arrnov <- update(Occ_formulas$fref_r3000_noday, ~ . + Arrival_nov1)
+Occ_formulas$fref_r3000_arrnov15 <- update(Occ_formulas$fref_r3000_noday, ~ . + Arrival_nov15)
 ## Detection: team fixed effects, and (team_day) a team-specific Sampling_day_log slope, since some teams may need no warm-up period
 Det_formulas <- list(
   team = ~ Forest_bin + Pc_start + I(Pc_start^2) + Sampling_day_log + Team_4 + Team_7 + Team_8,
@@ -83,6 +95,8 @@ Mcmc <- list(n.batch = 12000, n.burn = 150000, n.thin = 150, n.chains = 3)
 Mcmc_short <- list(n.batch = 4800, n.burn = 60000, n.thin = 60, n.chains = 3)
 ## Intermediate chains for multi-species fits (2026-11-15: 120,000 iterations left the community variances at Rhat 1.12-1.18): 200,000 iterations with 100,000 burn-in, thinned by 100 (1,000 kept per chain); _mid suffix
 Mcmc_mid <- list(n.batch = 8000, n.burn = 100000, n.thin = 100, n.chains = 3)
+## Doubled chains for multi-species fits (2026-11-16: the among-species variance of the silvopasture coefficient mixed poorly, Rhat 1.12-1.31 across variants): 600,000 iterations with 300,000 burn-in, thinned by 300 (1,000 kept per chain); _long suffix
+Mcmc_long <- list(n.batch = 24000, n.burn = 300000, n.thin = 300, n.chains = 3)
 ## Prior sensitivity (2026-11-15): variance of the normal prior on the occupancy coefficients (single-species) or on their community-level means (multi-species); spOccupancy's default is 2.72; _bvar<value> suffix
 
 ## Spatial range priors (phi = 3 / effective range in m): free from 0.5 km (within-farm point spacing) to 66 km (the largest distance between points; a longer range would act as an intercept); small 0.5-3 km; mid 25-30 km; large 60-66 km (extent-wide)
@@ -91,8 +105,8 @@ Tau_ig_migrants <- list(a = 1, b = 1)
 Range_priors <- list(free = c(0.5e3, 66e3), small = c(0.5e3, 3e3), mid = c(25e3, 30e3), large = c(60e3, 66e3))
 ## Fit variants, named <occupancy formula>_<range> (e.g. tot_free), chosen on the command line; tot_ / dry_ use the team detection formula, add_ / dist_ the team_day one, and ms_ fits the multi-species model; fits up to 2026-11-14 afternoon (tags prec_hinge_date_dayseason*) started the season on 1 October and had a collector-team random effect
 ## spatial = FALSE (multi-species only) fits tMsPGOcc with an unstructured location random effect in place of the spatial factor, as the 98-species non-spatial sensitivity (Multi_spp_100 row 85); the range prior is then unused and the tag says nonsp
-make_variant <- \(occ, range, det, multi = FALSE, periods = NULL, tau_ig = NULL, short = FALSE, mid = FALSE, beta_var = NULL, spatial = TRUE) list(occ.formula = if (spatial) Occ_formulas[[occ]] else update(Occ_formulas[[occ]], ~ . + (1 | Site_num)), spatial = spatial, det.formula = Det_formulas[[det]], priors = c(list(phi.unif = rev(3 / Range_priors[[range]])), if (!is.null(beta_var) && !multi) list(beta.normal = list(mean = 0, var = beta_var))), tau_ig = tau_ig, beta_var = beta_var, mcmc = if (short) Mcmc_short else if (mid) Mcmc_mid else Mcmc, multi = multi, periods = periods,
-                                                                                        tag = paste0("oct15_", if (det == "team") "teamfe" else det, "_", occ, "_", if (spatial) range else "nonsp", if (!is.null(tau_ig)) paste0("_ig", tau_ig$a, tau_ig$b), if (!is.null(beta_var)) paste0("_bvar", beta_var), if (short) "_short", if (mid) "_mid"))
+make_variant <- \(occ, range, det, multi = FALSE, periods = NULL, tau_ig = NULL, short = FALSE, mid = FALSE, long = FALSE, beta_var = NULL, spatial = TRUE) list(occ.formula = if (spatial) Occ_formulas[[occ]] else update(Occ_formulas[[occ]], ~ . + (1 | Site_num)), spatial = spatial, det.formula = Det_formulas[[det]], priors = c(list(phi.unif = rev(3 / Range_priors[[range]])), if (!is.null(beta_var) && !multi) list(beta.normal = list(mean = 0, var = beta_var))), tau_ig = tau_ig, beta_var = beta_var, mcmc = if (short) Mcmc_short else if (mid) Mcmc_mid else if (long) Mcmc_long else Mcmc, multi = multi, periods = periods,
+                                                                                        tag = paste0("oct15_", if (det == "team") "teamfe" else det, "_", occ, "_", if (spatial) range else "nonsp", if (!is.null(tau_ig)) paste0("_ig", tau_ig$a, tau_ig$b), if (!is.null(beta_var)) paste0("_bvar", beta_var), if (short) "_short", if (mid) "_mid", if (long) "_long"))
 Fit_variants <- c(
   cross2(c("tot", "dry"), names(Range_priors)) %>% set_names(map_chr(., \(x) paste(x, collapse = "_"))) %>% map(\(x) make_variant(x[[1]], x[[2]], "team")),
   list(add_free = make_variant("add", "free", "team_day"), dist_free = make_variant("dist", "free", "team_day"), ms_add_free = make_variant("add", "free", "team_day", multi = TRUE),
@@ -116,6 +130,12 @@ Fit_variants <- c(
   map(set_names(paste0("fref_r", c(3000, 5000))), \(occ) make_variant(occ, "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants)) %>% set_names(\(occ) paste0("ms_", occ, "_free")),
   ## Full-length single-species chains at S. striata's best radius (2026-11-16), the base model for S. striata in the report, against the full-length baseline fref_free
   list(fref_r5000_free = make_variant("fref_r5000", "free", "team_day")),
+  ## Base models without day of season (2026-11-16): S. ruticilla and P. rubra (fref_noday), S. striata (fref_r5000_noday), the multi-species model (fref_r3000_noday), full-length chains
+  ## Arrival indicator in place of day of season (2026-11-16), the same species and radii
+  ## Multi-species model with doubled chains: arrival ending 1 December (as the single-species fits), 1 November or 15 November
+  list(ms_fref_r3000_arr_free_long = make_variant("fref_r3000_arr", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, long = TRUE), ms_fref_r3000_arrnov_free_long = make_variant("fref_r3000_arrnov", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, long = TRUE), ms_fref_r3000_arrnov15_free_long = make_variant("fref_r3000_arrnov15", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, long = TRUE)),
+  list(fref_arr_free = make_variant("fref_arr", "free", "team_day"), fref_r5000_arr_free = make_variant("fref_r5000_arr", "free", "team_day"), ms_fref_r3000_arr_free = make_variant("fref_r3000_arr", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants)),
+  list(fref_noday_free = make_variant("fref_noday", "free", "team_day"), fref_r5000_noday_free = make_variant("fref_r5000_noday", "free", "team_day"), ms_fref_r3000_noday_free = make_variant("fref_r3000_noday", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants)),
   ## Community at the chosen 3 km radius without the spatial random effect, and its no-ring baseline (2026-11-16, user: location random effect instead), full-length chains
   list(ms_fref_nonsp = make_variant("fref", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, spatial = FALSE), ms_fref_r3000_nonsp = make_variant("fref_r3000", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, spatial = FALSE))
 )
@@ -241,6 +261,10 @@ Period_ref <- "25-26.Early"
 ss_l$occ.covs <- c(ss_l$occ.covs, set_names(map(setdiff(Periods_kept, Period_ref), \(k) matrix(as.numeric(Periods_kept == k), sum(Keep_site), length(Periods_kept), byrow = TRUE)), paste0("Period_", str_replace_all(setdiff(Periods_kept, Period_ref), "[-.]", "_"))))
 ## One intercept for both 2016-17 periods (the forest-reference variants)
 ss_l$occ.covs$Period_16_17 <- matrix(as.numeric(str_detect(Periods_kept, "^16-17")), sum(Keep_site), length(Periods_kept), byrow = TRUE)
+## Arrival period: location-period mean date before Arrival_end; unsurveyed cells are set to 0 (after arrival), which only affects predictions there
+ss_l$occ.covs$Arrival <- replace(1 * (Day_lp[Keep_site, Keep_time] < Arrival_end - Season_start), is.na(Day_lp[Keep_site, Keep_time]), 0)
+ss_l$occ.covs$Arrival_nov1 <- replace(1 * (Day_lp[Keep_site, Keep_time] < Arrival_end_comm - Season_start), is.na(Day_lp[Keep_site, Keep_time]), 0)
+ss_l$occ.covs$Arrival_nov15 <- replace(1 * (Day_lp[Keep_site, Keep_time] < Arrival_end_nov15 - Season_start), is.na(Day_lp[Keep_site, Keep_time]), 0)
 Surveyed_kept <- apply(ss_l$y, 1:2, \(v) any(!is.na(v)))
 cat("Forest cover within 300 m (%) by habitat, surveyed location-periods:", paste(names(hab_f <- tapply(ss_l$occ.covs$Forest_300[Surveyed_kept] * Forest_scale[["SD"]] + Forest_scale[["Mean"]], matrix(as.character(ss_l$occ.covs$Habitat), nrow(Surveyed_kept), ncol(Surveyed_kept))[Surveyed_kept], mean)), round(hab_f), collapse = ", "), "| r with Dist_inside", round(cor(ss_l$occ.covs$Forest_300[Surveyed_kept], ss_l$occ.covs$Dist_inside[Surveyed_kept]), 2), "| r with ssp", round(cor(ss_l$occ.covs$Forest_300[Surveyed_kept], ss_l$occ.covs$ssp[Surveyed_kept]), 2), "\n")
 cat("Silvopasture sub-types (locations kept):", paste(names(table(ss_l$occ.covs$Habitat_split)), table(ss_l$occ.covs$Habitat_split), collapse = ", "), "\n")
