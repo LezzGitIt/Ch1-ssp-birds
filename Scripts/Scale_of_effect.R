@@ -26,8 +26,12 @@ Clip_dir <- "../Farm_diversity/Data/Geospatial/canopy_rasters"
 National_dir <- "../Geospatial_data/Environmental"
 Raster_years <- c(2013, 2014, 2016, 2017, 2019, 2022, 2024)
 
+## Rings wider than the farm clips reach (user, 2026-11-15: migrants may perceive the landscape at large scales, but the study extent, at most 66 km between points, leaves little contrast beyond this), from the national canopy maps into their own table, so the farm-scale ring table stays as the 98-species fits used it
+Wide_radii_m <- 20000
+
 ## Outputs
 Rings_csv <- "Derived/Excels/Canopy_rings_by_location.csv"
+Rings_wide_csv <- "Derived/Excels/Canopy_rings_by_location_20km.csv"
 Fig_dir <- "Figures/Scale_of_effect"
 
 ## Fits to run, from the command line: 'baseline', 'r<radius>' (e.g. r300), or 'smoke' (10 batches, 1 chain, with the 1 km ring; checks the model terms); none when the script is sourced
@@ -47,6 +51,17 @@ Primary_fit_settings <- list(
   out_dir = "Derived/Rdata/Model_output/Temporal/Scale_of_effect",
   seed = 20261107
 )
+
+# Functions ----
+# Ring means from exactextractr's coverage-weighted disc sums and cell counts (one row per location x raster year x radius, the inner disc included): ring mean = (outer sum - inner sum) / (outer count - inner count)
+ring_means <- function(disc_sums, inner_m) {
+  disc_sums %>%
+    filter(Radius_m != inner_m) %>%
+    left_join(disc_sums %>% filter(Radius_m == inner_m) %>% select(Id_survey_no_dc, Raster_year, sum_inner = sum, count_inner = count), by = c("Id_survey_no_dc", "Raster_year")) %>%
+    mutate(Canopy_cover_ring = round((sum - sum_inner) / (count - count_inner), 3)) %>%
+    select(Id_survey_no_dc, Raster_year, Radius_m, Canopy_cover_ring) %>%
+    arrange(Id_survey_no_dc, Raster_year, Radius_m)
+}
 
 # Load data ----
 ## Surveyed rows of the model, with the survey year taken as in the wrangling script (latest year within a location x year-group x season) and snapped to the nearest raster year (2025-26 surveys use 2024)
@@ -99,15 +114,27 @@ if (file.exists(Rings_csv)) {
     }) %>%
     list_rbind()
 
-  Canopy_rings <- Disc_sums %>%
-    filter(Radius_m != Ring_inner_m) %>%
-    left_join(Disc_sums %>% filter(Radius_m == Ring_inner_m) %>% select(Id_survey_no_dc, Raster_year, sum_inner = sum, count_inner = count), by = c("Id_survey_no_dc", "Raster_year")) %>%
-    mutate(Canopy_cover_ring = round((sum - sum_inner) / (count - count_inner), 3)) %>%
-    select(Id_survey_no_dc, Raster_year, Radius_m, Canopy_cover_ring) %>%
-    arrange(Id_survey_no_dc, Raster_year, Radius_m)
+  Canopy_rings <- ring_means(Disc_sums, Ring_inner_m)
   write_csv(Canopy_rings, Rings_csv)
 }
 stopifnot(!anyNA(Canopy_rings$Canopy_cover_ring))
+
+## Wider rings, run once: the same ring means from each raster year's national map, cropped around that year's locations
+if (!file.exists(Rings_wide_csv)) {
+  Loc_years %>%
+    group_split(Raster_year) %>%
+    map(\(grp) {
+      pts <- terra::vect(grp, geom = c("Long", "Lat"), crs = "EPSG:4326")
+      canopy_r <- terra::crop(terra::rast(file.path(National_dir, sprintf("Colombia_WVCC_%d.tif", grp$Raster_year[1]))), terra::buffer(pts, max(Wide_radii_m) + 500), snap = "out")
+      map(c(Ring_inner_m, Wide_radii_m), \(radius) {
+        exactextractr::exact_extract(canopy_r, sf::st_as_sf(terra::buffer(pts, width = radius)), c("sum", "count"), progress = FALSE) %>%
+          mutate(Id_survey_no_dc = grp$Id_survey_no_dc, Raster_year = grp$Raster_year, Radius_m = radius)
+      }) %>% list_rbind()
+    }) %>%
+    list_rbind() %>%
+    ring_means(Ring_inner_m) %>%
+    write_csv(Rings_wide_csv)
+}
 
 # Covariate diagnostics across radii ----
 Rows_rings <- Rows %>%
