@@ -114,6 +114,8 @@ Fit_variants <- c(
   map(set_names(paste0("fref_r", Ring_radii_m)), \(occ) make_variant(occ, "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, short = TRUE)) %>% set_names(\(occ) paste0("ms_", occ, "_free_short")),
   ## Full-length chains for the best community radii (2026-11-15), against the full-length baseline ms_fref_free
   map(set_names(paste0("fref_r", c(3000, 5000))), \(occ) make_variant(occ, "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants)) %>% set_names(\(occ) paste0("ms_", occ, "_free")),
+  ## Full-length single-species chains at S. striata's best radius (2026-11-16), the base model for S. striata in the report, against the full-length baseline fref_free
+  list(fref_r5000_free = make_variant("fref_r5000", "free", "team_day")),
   ## Community at the chosen 3 km radius without the spatial random effect, and its no-ring baseline (2026-11-16, user: location random effect instead), full-length chains
   list(ms_fref_nonsp = make_variant("fref", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, spatial = FALSE), ms_fref_r3000_nonsp = make_variant("fref_r3000", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, spatial = FALSE))
 )
