@@ -239,22 +239,25 @@ species_site_counts <- map(comm_l, colSums) %>% reduce(`+`) %>% (\(x) x / length
 # below prints each photographed species' real (unoffset) position every run, to read off when
 # choosing/updating offsets. geom_image() preserves each photo's own aspect ratio automatically.
 species_photo_dir <- "Figures/Species_images"
-default_photo_size <- 0.15   # fraction of plot width - bump up/down to resize all photos at once
+default_photo_size <- 0.17   # fraction of plot width - bump up/down to resize all photos at once
 photo_label_gap <- 0.1        # NMDS units between a photo and its name label, drawn just below it
+# Panel limits (NMDS units), set by hand so every photo sits wholly inside the panel; check them against the photo offsets whenever either changes
+plot_xlim <- c(-1.05, 0.95)
+plot_ylim <- c(-1.2, 0.75)
 
 # photo_size defaults to default_photo_size for every row below; override individual rows (e.g.
 # Tyrannus_melancholicus here) to size one photo differently from the rest.
 species_photo_offsets <- tribble(
   ~Species,                 ~x_offset, ~y_offset, ~photo_size,
-  "Sturnella_magna",        -0.15,     -0.6,      default_photo_size,
-  "Vanellus_chilensis",     -0.2,      0.4,       default_photo_size,
-  "Caracara_cheriway",       0,       0.8,     default_photo_size,
-  "Tyrannus_melancholicus", -0.3,      0.55,      default_photo_size * 0.7,
-  "Euphonia_laniirostris",   0.04,    -0.75,       default_photo_size,
-  "Ramphocelus_carbo",       0.4,       0.65,    default_photo_size,
-  "Thryophilus_rufalbus",    0.35,     -0.55,       default_photo_size,
-  "Coragyps_atratus",       -0.26,     -0.9,      default_photo_size,
-  "Cercomacroides_tyrannina", 0.4,      0.05,     default_photo_size,
+  "Sturnella_magna",        -0.13,     -0.6,      default_photo_size,
+  "Vanellus_chilensis",     -0.3,      0.6,       default_photo_size,
+  "Caracara_cheriway",       0,        0.5,       default_photo_size,
+  "Tyrannus_melancholicus", -0.2,      -0.52,     default_photo_size * 0.7,
+  "Euphonia_laniirostris",   0.1,      -0.68,     default_photo_size,
+  "Ramphocelus_carbo",       0.1,      -0.72,     default_photo_size * 1.2,
+  "Thryophilus_rufalbus",    0.4,      -0.45,     default_photo_size * 1.2,
+  "Coragyps_atratus",       -0.24,     -0.92,     default_photo_size,
+  "Cercomacroides_tyrannina", 0.4,      0.1,      default_photo_size,
 )
 
 species_photo_files <- list.files(species_photo_dir, pattern = "\\.png$", full.names = FALSE)
@@ -415,6 +418,14 @@ outside_counts <- species_scores %>%
 write_csv(outside_counts, paste0("Derived/Excels/nmds_ellipse_counts_outside_x", ellipse_wide_scale, "_", model_tag, ".csv"))
 cat("\nSpecies outside all three ellipses, against the ellipses enlarged ", ellipse_wide_scale, " times:\n", sep = "")
 print(outside_counts, n = Inf)
+## Every species against the enlarged ellipses (as plotted positions only), for the enlarged-ellipse figure
+wide_counts <- species_scores %>%
+  mutate(Class = ellipse_class(cbind(NMDS1, NMDS2), wide_fits)) %>%
+  count(Class, name = "As_plotted") %>%
+  arrange(desc(As_plotted), Class)
+write_csv(wide_counts, paste0("Derived/Excels/nmds_ellipse_counts_x", ellipse_wide_scale, "_", model_tag, ".csv"))
+cat("\nAll species against the ellipses enlarged ", ellipse_wide_scale, " times:\n", sep = "")
+print(wide_counts, n = Inf)
 
 # Candidate species for photos -----------------------------------------------
 # Ranks species by draw-to-draw position stability (lower combined SD = more consistent across
@@ -515,7 +526,7 @@ nmds_plot <- ggplot() +
   # clip = "off" lets photos/labels spill into the plot margins rather than being cut off at the
   # panel edge - paired with the wider plot.margin below, which gives them literal canvas space
   # to render into
-  coord_cartesian(clip = "off") +
+  coord_cartesian(xlim = plot_xlim, ylim = plot_ylim, clip = "off") +
   theme_bw() +
   theme(
     plot.margin = margin(t = 60, r = 60, b = 60, l = 60),
@@ -544,14 +555,35 @@ nmds_plot <- ggplot() +
 # Filename tracks show_species_labels so the cluttered and clean versions don't overwrite each other.
 # 16:9 aspect (widescreen PowerPoint slide) rather than the previous ~16:13 - wider canvas at the
 # same height, so the figure fills more of the slide instead of leaving side margins once placed.
-output_file <- paste0("Figures/NMDS_meta/nmds_habitat_", model_tag, "_posterior", if (show_species_labels) "" else "_no_text", ".png")
-ggsave(output_file, nmds_plot, bg = "white", width = 20, height = 11.25)
-
-# The 20x11.25 canvas above is sized generously so margin-space photos never get cut off, which
+# The 20x11.25 canvas is sized generously so margin-space photos never get cut off, which
 # leaves wasted white space wherever the actual content doesn't reach that far - trim it off the
 # saved file directly rather than hand-tuning width/height to match the content's real extent.
 # The trim leaves the y-axis title against the left edge, so a white strip as wide as the space below the x-axis title is added back there
-left_pad_px <- 90
-trimmed <- magick::image_trim(magick::image_read(output_file), fuzz = 2)
-magick::image_append(c(magick::image_blank(left_pad_px, magick::image_info(trimmed)$height, "white"), trimmed)) %>%
-  magick::image_write(output_file)
+save_trimmed <- function(plot, file, left_pad_px = 90) {
+  ggsave(file, plot, bg = "white", width = 20, height = 11.25)
+  trimmed <- magick::image_trim(magick::image_read(file), fuzz = 2)
+  magick::image_append(c(magick::image_blank(left_pad_px, magick::image_info(trimmed)$height, "white"), trimmed)) %>%
+    magick::image_write(file)
+}
+output_file <- paste0("Figures/NMDS_meta/nmds_habitat_", model_tag, "_posterior", if (show_species_labels) "" else "_no_text", ".png")
+save_trimmed(nmds_plot, output_file)
+
+# Enlarged-ellipse figure ----------------------------------------------------
+# Supplementary view of the same ordination with every ellipse enlarged ellipse_wide_scale times (2 = 2 SD): thin per-draw and bold mean enlarged ellipses, the 1-SD mean ellipses dashed for comparison, every species as an unlabelled cross
+wide_draw_ellipses <- map(draw_ellipse_fit, \(g) { g$scale <- g$scale * ellipse_wide_scale; g }) %>%
+  ellipse_polygon() %>%
+  mutate(Habitat = str_split_i(Group, "_", 1))
+wide_mean_ellipses <- ellipse_polygon(wide_fits) %>% rename(Habitat = Group)
+
+nmds_wide_plot <- ggplot() +
+  geom_point(data = mean_site_scores, aes(x = NMDS1, y = NMDS2, color = Habitat), alpha = 0.25, size = 1, show.legend = FALSE) +
+  geom_path(data = wide_draw_ellipses, aes(x, y, group = Group, color = Habitat), alpha = 0.1, linewidth = 0.4) +
+  geom_path(data = mean_ellipses, aes(x, y, color = Habitat), linewidth = 0.7, linetype = "dashed") +
+  geom_path(data = wide_mean_ellipses, aes(x, y, color = Habitat), linewidth = 1.4) +
+  geom_point(data = species_scores, aes(x = NMDS1, y = NMDS2), color = "black", alpha = 0.7, size = 2.4, shape = 4, stroke = 0.8) +
+  scale_color_manual(values = habitat_colors, breaks = names(habitat_colors)) +
+  theme_bw() +
+  theme(axis.title = element_text(size = 16), axis.text = element_text(size = 12), legend.title = element_text(size = 16), legend.text = element_text(size = 14)) +
+  labs(x = "NMDS1", y = "NMDS2", color = "Habitat")
+
+save_trimmed(nmds_wide_plot, paste0("Figures/NMDS_meta/nmds_habitat_", model_tag, "_posterior_x", ellipse_wide_scale, "sd.png"))
