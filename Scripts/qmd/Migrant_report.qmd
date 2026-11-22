@@ -25,6 +25,10 @@ execute:
 library(tidyverse)
 library(knitr)
 
+# Include the supplementary sensitivity checks (child document); when FALSE the text says they are not shown
+show_sensitivity <- FALSE
+sens_ref <- if (show_sensitivity) "[Sensitivity checks](#sec-sensitivity)" else "sensitivity checks not shown"
+
 # Fits from the migrant analysis script (forest-reference variants, 2026-11-15): forest as the reference habitat, one intercept per survey period with the two 2016-17 periods merged (2025-26 reference), team-specific warm-up slopes and the free spatial range prior
 fit_dir <- "Derived/Rdata/Model_output/Temporal/Single_species"
 # Single-species fits only for migrants detected often enough outside forest to estimate habitat contrasts
@@ -33,7 +37,9 @@ species_ss <- c("Setophaga_striata", "Setophaga_ruticilla", "Piranga_rubra")
 striata_radius <- 5000
 comm_radius <- 3000
 # Base models (2026-11-16): the forest-reference variants plus landscape canopy cover at the chosen radius, with an arrival-period indicator in place of day of season (user, 2026-11-16: with period intercepts the linear day-of-season slope came almost only from forest in October-December 2016 vs March 2017); arrival ends 1 December, and the multi-species model has doubled chains (its silvopasture among-species variance mixed poorly at the standard length)
-ss_tags <- c(Setophaga_striata = paste0("oct15_team_day_fref_r", striata_radius, "_arr_free"), Setophaga_ruticilla = "oct15_team_day_fref_arr_free", Piranga_rubra = "oct15_team_day_fref_arr_free")
+ss_oct15_tags <- c(Setophaga_striata = paste0("oct15_team_day_fref_r", striata_radius, "_arr_free"), Setophaga_ruticilla = "oct15_team_day_fref_arr_free", Piranga_rubra = "oct15_team_day_fref_arr_free")
+# Single-species base models on species-specific windows (user, 2026-11-18; the analysis script's swin flag): start from our Meta data (15 October for S. striata, 24 September for S. ruticilla and P. rubra, whose detection then needs teams 1 and 2), arrival end and season end from eBird Status and Trends' non-breeding start and end; the 15 October fits above remain the base of the season-term comparison and the sensitivity checks
+ss_tags <- c(Setophaga_striata = paste0("swin_team_day_fref_r", striata_radius, "_arr_free"), Setophaga_ruticilla = "swin_team_day_sep24_fref_arr_free", Piranga_rubra = "swin_team_day_sep24_fref_arr_free")
 # Multi-species base model (user, 2026-11-17): season from 24 September, so the passage detections of C. virens and C. ustulatus (GAICA's 2019 distance-gradient surveys) are kept, with a passage indicator (mean date before 15 October) and an arrival indicator ending 15 November; teams 1 and 2 (the distance-gradient surveys) added to detection
 ms_tag <- paste0("sep24_team_day_sep24_fref_r", comm_radius, "_arrnov15_pass_free_ig11_long")
 # The same 24 September data with shorter chains: passage + arrival ending 1 December, passage + arrival ending 15 November, and arrival ending 1 December alone, for the choice of passage and arrival terms
@@ -51,9 +57,8 @@ striata_nc_arr_tag <- "oct15_team_day_fref_arr_free"
 # The same models without canopy and with day of season, the base of the sensitivity variants below (habitat-by-rainfall, prior variance, reference level, silvopasture's distance slope, silvopasture split), which were not refit (user, 2026-11-16: sensitivity checks are rerun before publication)
 ss_tag <- "oct15_team_day_fref_free"
 ms_nc_tag <- "oct15_team_day_fref_free_ig11"
-# Habitat-by-annual-rainfall variants of the same models (the multi-species one with 200,000-iteration chains)
-ss_rain_tag <- "oct15_team_day_fref_rain_free"
-ms_rain_tag <- "oct15_team_day_fref_rain_free_ig11_mid"
+# Habitat-by-annual-rainfall interaction (user, 2026-11-19): multi-species only, on the community base model without pasture (nopast flag: a pasture rainfall slope would rest on a handful of detections), so habitat is forest vs silvopasture; the single-species models stay additive
+ms_rain_tag <- paste0("nopast_sep24_team_day_sep24_fref_r", comm_radius, "_rain_arrnov15_pass_free_ig11_long")
 # Prior sensitivity: variance of the normal prior on the occupancy coefficients (single-species) or on their community-level means (multi-species), 1 and 10 instead of spOccupancy's default 2.72
 prior_vars <- c(1, 10)
 # Scale of effect of landscape canopy cover (2026-11-15): ring profiles and spatial-effect summaries, written by the migrant analysis script's ring_compare section
@@ -70,7 +75,7 @@ not_nearctic <- c("Chrysolampis mosquitus", "Coccyzus lansbergi", "Elaenia palla
 mixed_status <- c("Setophaga petechia", "Vireo olivaceus")
 # The tag must be followed directly by the fit date, so e.g. "fref_free" does not also match "fref_free_short"
 fit_path <- \(sp, tag) list.files(fit_dir, paste0("^Occ_mod_", sp, "_", tag, "_\\d{4}-\\d{2}-\\d{2}\\.rds$"), full.names = TRUE)
-stopifnot(all(imap_int(ss_tags, \(tag, sp) length(fit_path(sp, tag))) == 1), all(map_int(c(ss_tag, striata_nc_arr_tag), \(tag) length(fit_path("Setophaga_striata", tag))) == 1), all(map_int(c(ms_tag, ms_oct15_tag, ms_sep24_test_tags, ms_day_tag, ms_nc_tag, ms_nonsp_tag, ms_ring_nonsp_tag), \(tag) length(fit_path("10_boreal_migrants", tag))) == 1))
+stopifnot(all(map_lgl(list(ss_tags, ss_oct15_tags), \(tags) all(imap_int(tags, \(tag, sp) length(fit_path(sp, tag))) == 1))),all(map_int(c(ss_tag, striata_nc_arr_tag), \(tag) length(fit_path("Setophaga_striata", tag))) == 1), all(map_int(c(ms_tag, ms_rain_tag, ms_oct15_tag, ms_sep24_test_tags, ms_day_tag, ms_nc_tag, ms_nonsp_tag, ms_ring_nonsp_tag), \(tag) length(fit_path("10_boreal_migrants", tag))) == 1))
 ```
 
 ```{r}
@@ -78,15 +83,39 @@ stopifnot(all(imap_int(ss_tags, \(tag, sp) length(fit_path(sp, tag))) == 1), all
 # The migrant analysis script's data section (no fits run without fit names on the command line) gives the season window, teams, periods, day-of-season scaling, covariate scaling and the multi-species detection array
 invisible(capture.output(suppressMessages(source("Scripts/Migrant_occupancy.R", local = TRUE))))
 species_label <- \(sp) str_replace(sp, "_", " ")
+julian_date <- \(j, year) sub("^0", "", format(as.Date(j - 1, origin = paste0(year, "-01-01")), "%d %B"))
 fits <- map(set_names(species_ss), \(sp) readRDS(fit_path(sp, ss_tags[[sp]])))
+fits_oct15 <- map(set_names(species_ss), \(sp) readRDS(fit_path(sp, ss_oct15_tags[[sp]])))
+## Each single-species fit's own data (species-specific window, and without pasture for the rainfall fits): the analysis script's data section again, with that fit's flags in place of the command line
+species_data <- function(sp, flags) {
+  env <- new.env()
+  env$commandArgs <- \(...) c(paste0("species=", sp), flags)
+  invisible(capture.output(suppressMessages(source("Scripts/Migrant_occupancy.R", local = env))))
+  list(ss_l = env$ss_l, start = env$Season_start, end = env$Season_end, arrival_end = env$Arrival_end, farm = env$Stacked_oc$Farm_name[match(env$Site_levels[env$Keep_site], env$Stacked_oc$Id_survey_no_dc)])
+}
+ss_data <- map(set_names(species_ss), \(sp) species_data(sp, "swin"))
+stopifnot(all(imap_lgl(fits, \(m, sp) identical(dim(m$y), dim(ss_data[[sp]]$ss_l$y)))))
+# The multi-species rainfall fit's data (24 September season without pasture); any focal species gives the same locations and covariates
+comm_nopast <- species_data(species_ss[1], c("sep24", "nopast"))
+stopifnot(!"Pastizales" %in% comm_nopast$ss_l$occ.covs$Habitat)
+comm_nopast_farms <- tapply(comm_nopast$farm, as.character(comm_nopast$ss_l$occ.covs$Habitat), n_distinct)
+## Per species: window dates, visits, locations, location-periods by habitat (and those with a detection) and farms by habitat
+data_summary <- map(ss_data, \(d) {
+  surveyed <- apply(d$ss_l$y, 1:2, \(v) any(!is.na(v)))
+  hab <- as.character(d$ss_l$occ.covs$Habitat)
+  list(start = julian_date(d$start, 2025), end = julian_date(d$end, 2025), arrival_end = julian_date(d$arrival_end, 2025), n_visits = sum(!is.na(d$ss_l$y)), n_locations = nrow(surveyed),
+       lp = tapply(rowSums(surveyed), hab, sum), det_lp = tapply(rowSums(apply(d$ss_l$y, 1:2, \(v) any(v == 1, na.rm = TRUE))), hab, sum), farms = tapply(d$farm, hab, n_distinct))
+})
 ms_fit <- readRDS(fit_path("10_boreal_migrants", ms_tag))
 # Base models without canopy, against which the sensitivity variants are compared
 striata_nc <- readRDS(fit_path("Setophaga_striata", ss_tag))
 ms_fit_nc <- readRDS(fit_path("10_boreal_migrants", ms_nc_tag))
 # WAIC of the base models with and without day of season, and the largest change in any silvopasture contrast (logit scale, posterior medians) when it is dropped
 waic_of <- \(m) spOccupancy::waicOcc(m, by.sp = FALSE)[["WAIC"]]
-season_waic <- c(map(set_names(species_ss), \(sp) c(day = waic_of(readRDS(fit_path(sp, ss_day_tags[[sp]]))), none = waic_of(readRDS(fit_path(sp, ss_noday_tags[[sp]]))), arrival = waic_of(fits[[sp]]))),
-                 list(Community = c(day = waic_of(readRDS(fit_path("10_boreal_migrants", ms_day_tag))), none = waic_of(readRDS(fit_path("10_boreal_migrants", ms_noday_tag))), arrival = waic_of(readRDS(fit_path("10_boreal_migrants", ms_oct15_tag))))))
+# The multi-species model on the 15 October season (without the passage surveys), for the season-term comparison and the effect of the passage surveys on the habitat contrasts
+ms_oct15 <- readRDS(fit_path("10_boreal_migrants", ms_oct15_tag))
+season_waic <- c(map(set_names(species_ss), \(sp) c(day = waic_of(readRDS(fit_path(sp, ss_day_tags[[sp]]))), none = waic_of(readRDS(fit_path(sp, ss_noday_tags[[sp]]))), arrival = waic_of(fits_oct15[[sp]]))),
+                 list(Community = c(day = waic_of(readRDS(fit_path("10_boreal_migrants", ms_day_tag))), none = waic_of(readRDS(fit_path("10_boreal_migrants", ms_noday_tag))), arrival = waic_of(ms_oct15))))
 # 24 September season: WAIC of the three passage and arrival codings (short chains), and the among-species variance Rhat of the passage coefficient
 ms_sep24_tests <- map(ms_sep24_test_tags, \(tag) readRDS(fit_path("10_boreal_migrants", tag)))
 sep24_waic <- map_dbl(ms_sep24_tests, waic_of)
@@ -96,8 +125,8 @@ rm(ms_sep24_tests)
 ms_arrnov <- readRDS(fit_path("10_boreal_migrants", ms_arrnov_tag))
 arrnov_rhat <- ms_arrnov$rhat$tau.sq.beta[colnames(ms_arrnov$tau.sq.beta.samples) == "Arrival_nov1"]
 arrnov_sp <- apply(as.matrix(ms_arrnov$beta.samples)[, paste0("Arrival_nov1-", Migrants)], 2, median) %>% set_names(Migrants)
-# Arrival effects in the base models (logit scale)
-arrival_ss <- map(fits, \(m) m$beta.samples[, "Arrival"])
+# Arrival effects in the 15 October base models (logit scale), for the season-term comparison
+arrival_ss <- map(fits_oct15, \(m) m$beta.samples[, "Arrival"])
 n_visits <- sum(!is.na(ss_l$y))
 n_locations <- dim(ss_l$y)[1]
 habitat <- as.character(ss_l$occ.covs$Habitat)
@@ -125,6 +154,13 @@ passage_lp <- table(comm_hab[comm_surveyed & comm_l$occ.covs$Passage == 1])
 # Visits with a detection and location-periods with a detection by habitat, per migrant, in the multi-species data
 detections <- apply(comm_l$y, 1, sum, na.rm = TRUE)
 comm_det_lp_by_habitat <- map(set_names(Migrants), \(sp) tapply(c(apply(comm_l$y[sp, , , ], 1:2, \(v) any(v == 1, na.rm = TRUE))), c(comm_hab), sum))
+# Survey effort in the multi-species data: location-periods and farms by habitat, visits per location-period and the days between its first and last visit
+stopifnot(identical(comm_env$Periods_kept, Periods_kept))
+comm_lp_by_habitat <- tapply(c(comm_surveyed), c(comm_hab), sum)
+comm_farms_by_habitat <- tapply(Stacked_oc$Farm_name[match(dimnames(comm_l$y)[[2]], Stacked_oc$Id_survey_no_dc)], comm_hab[, 1], n_distinct)
+comm_visit_days <- keep(asplit(comm_env$Day_raw[comm_env$Keep_site, comm_env$Keep_time, , drop = FALSE], 1:2), \(v) any(!is.na(v)))
+comm_lp_visits <- map_int(comm_visit_days, \(v) sum(!is.na(v)))
+comm_lp_span <- map_dbl(comm_visit_days, \(v) diff(range(v, na.rm = TRUE)))
 passage_detections <- map_dbl(set_names(Migrants), \(sp) sum(comm_l$y[sp, , , ][rep(comm_l$occ.covs$Passage == 1, dim(comm_l$y)[4])], na.rm = TRUE))
 rm(comm_env)
 # Detections outside the season window (mostly September-October passage), per migrant
@@ -143,7 +179,6 @@ ssp_scale <- filter(Scaling, Process == "occupancy", Covariate == "ssp")
 canopy_scale <- Ring_rows %>% filter(Radius_m == comm_radius) %>% summarise(Mean = mean(Canopy_cover_ring), SD = sd(Canopy_cover_ring))
 prec_scale <- filter(Scaling, Process == "occupancy", Covariate == "Tot_prec")
 # First autumn S. striata detection at the modelled locations, and the 2019 visits there before the season window, none with S. striata
-julian_date <- \(j, year) sub("^0", "", format(as.Date(j - 1, origin = paste0(year, "-01-01")), "%d %B"))
 striata_autumn <- Julian[which(Migrants_l$y["Setophaga_striata", , , ] == 1 & Julian > 182)]
 first_detection <- paste(julian_date(min(striata_autumn), 2019), 2019)
 early_2019 <- !is.na(Julian) & Julian > 182 & Julian < Season_start & slice.index(Julian, 2) == match("19.Early", Time_levels) & !(Team %in% Team_drop)
@@ -153,13 +188,8 @@ stopifnot(sum(Migrants_l$y["Setophaga_striata", , , ][early_2019], na.rm = TRUE)
 arrival_end_date <- julian_date(Arrival_end, 2025)
 passage_end_date <- julian_date(Passage_end, 2025)
 comm_arrival_end_date <- julian_date(Arrival_end_nov15, 2025)
-# Visits per location-period and the days between its first and last visit (season window): median (mean, maximum)
-visit_days <- keep(asplit(Day_raw[Keep_site, Keep_time, , drop = FALSE], 1:2), \(v) any(!is.na(v)))
-lp_visits <- map_int(visit_days, \(v) sum(!is.na(v)))
-lp_span <- map_dbl(visit_days, \(v) diff(range(v, na.rm = TRUE)))
-mmm <- \(x) paste0(sprintf("%.0f", median(x)), " (mean ", sprintf("%.1f", mean(x)), ", maximum ", sprintf("%.0f", max(x)), ")")
 # Survey periods as written in the text
-period_text <- paste(c(`16-17.Early` = "October-December 2016", `16-17.Late` = "March 2017", `19.Early` = "November 2019", `25-26.Early` = "January-February 2026")[Periods_kept], collapse = ", ")
+period_text <- paste(c(`16-17.Early` = "October-December 2016", `16-17.Late` = "March 2017", `19.Early` = "September-November 2019", `25-26.Early` = "January-February 2026")[Periods_kept], collapse = ", ")
 ```
 
 ```{r}
@@ -179,19 +209,23 @@ ss_contrasts <- map(ss_beta, contrasts_of)
 ms_contrasts <- map(ms_beta, contrasts_of)
 comm_contrasts <- contrasts_of(comm_beta)
 striata_nc_contrasts <- contrasts_of(striata_nc$beta.samples)
+## Largest change in a habitat contrast (posterior medians, logit scale) between the 15 October and 24 September multi-species fits, for S. striata and the community-level means
+max_shift <- \(a, b) max(abs(map_dbl(a, median) - map_dbl(b, median)))
+passage_shift <- c(striata = max_shift(ms_contrasts$Setophaga_striata, contrasts_of(species_beta(ms_oct15)$Setophaga_striata)), comm = max_shift(comm_contrasts, contrasts_of(as.matrix(ms_oct15$beta.comm.samples))))
+rm(ms_oct15)
 ## Convergence: largest Rhat of the single-species fits, community-level Rhat of the multi-species fit and its species coefficients above 1.1
 max_rhat_ss <- max(map_dbl(fits, \(m) max(unlist(m$rhat), na.rm = TRUE)))
 max_rhat_comm <- max(unlist(ms_fit$rhat[c("beta.comm", "alpha.comm", "tau.sq.beta", "tau.sq.alpha")]), na.rm = TRUE)
 # Largest community-level Rhat among the occupancy terms; the text says the overall maximum is a detection term
 max_rhat_comm_occ <- max(unlist(ms_fit$rhat[c("beta.comm", "tau.sq.beta")]), na.rm = TRUE)
 stopifnot(max_rhat_comm > max_rhat_comm_occ)
+## Effective range of the shared spatial factor (km; exponential correlation, 3 / phi)
+eff_range_km <- 3 / ms_fit$theta.samples[, grep("phi", colnames(ms_fit$theta.samples))[1]] / 1000
 n_sp_rhat <- sum(unlist(ms_fit$rhat[c("beta", "alpha")]) > 1.1, na.rm = TRUE)
 
 ## Prediction conditions: the reference period (2025-26, surveyed in all three habitats), at its mean day of season for the sensitivity fits that still include it, at the forest edge, other covariates at their means, spatial random effect at zero (an average location)
 ref_col <- which(Periods_kept == Period_ref)
 day_ref <- mean(ss_l$occ.covs$Day_season[surveyed_lp[, ref_col], ref_col])
-day_to_date <- \(d) as.Date(Season_start - 1, origin = "2025-01-01") + round(d * Day_sd + Day_mean)
-day_ref_date <- format(day_to_date(day_ref), "%d %B")
 hab_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Bosque = "Forest")
 hab_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", Forest = "#008300")
 ## Occupancy draws for one habitat; distances in SD units, silvopasture cover and day of season (fits that include it) on the model's standardized scales
@@ -202,8 +236,12 @@ pred_occ <- function(b, hab, dist_open = 0, dist_inside = 0, ssp = 0, day = day_
   canopy_term <- grep("^Canopy_r", colnames(b), value = TRUE)
   if (length(canopy_term)) eta <- eta + b[, canopy_term] * canopy
   if (hab != "Bosque") eta <- eta + b[, paste0("Habitat_fref", hab)]
-  # Habitat-by-rainfall fits: the habitat's difference from the forest rainfall slope
-  if (paste0("Habitat_fref", hab, ":Tot_prec") %in% colnames(b)) eta <- eta + b[, paste0("Habitat_fref", hab, ":Tot_prec")] * prec
+  # Habitat-by-rainfall and habitat-by-cover fits: the habitat's difference from the forest slope
+  int_values <- c(Tot_prec = prec, ssp = ssp)
+  for (k in names(int_values)) {
+    int_col <- paste0("Habitat_fref", hab, ":", k)
+    if (int_col %in% colnames(b)) eta <- eta + b[, int_col] * int_values[[k]]
+  }
   plogis(eta)
 }
 ## Occupancy draws at one value of one covariate, given in display units (m: signed distance to the forest edge; ssp: % within 300 m; prec: annual rainfall in mm; canopy: % canopy cover in the community's ring), others at the prediction conditions
@@ -217,13 +255,25 @@ pred_at <- function(b, hab_label, var, x) {
 }
 summarise_draws <- \(tbl) tbl %>% mutate(med = map_dbl(draws, median), lcl = map_dbl(draws, quantile, 0.025), ucl = map_dbl(draws, quantile, 0.975)) %>% select(-draws)
 
+## Table formatting shared by all tables: PDF with booktabs rules, alternate row shading, 9 pt and no extra row spacing, species in italics and multi-line headers broken where given ("\n"); Word plain
+latex <- knitr::is_latex_output()
+italic_species <- \(sp, marks = "") if (latex) paste0("\\textit{", sp, "}", marks) else paste0("*", sp, "*", marks)
+star_mark <- if (latex) "*" else "\\*"
+report_table <- function(tbl, col_names = names(tbl), align = NULL, widths = NULL) {
+  if (!latex) return(kable(tbl, col.names = str_replace_all(col_names, "\n", " "), align = align))
+  col_names <- map_chr(col_names, \(x) if (str_detect(x, "\n")) kableExtra::linebreak(x, align = "c") else x)
+  out <- kable(tbl, format = "latex", booktabs = TRUE, escape = FALSE, linesep = "", align = align, col.names = col_names) %>%
+    kableExtra::kable_styling(latex_options = "striped", font_size = 9)
+  # Column widths (NA leaves a column at its natural width)
+  for (i in which(!is.na(widths))) out <- kableExtra::column_spec(out, i, width = widths[i])
+  out
+}
+
 ## Table 1: visits with a detection (season window) of every migrant in the multi-species model
 data_tbl <- tibble(sp = Migrants) %>%
-  mutate(Species = paste0("*", species_label(sp), "*", if_else(sp %in% species_ss, "\\*", "")), `Visits with a detection` = detections[sp],
+  mutate(Species = italic_species(species_label(sp), if_else(sp %in% species_ss, star_mark, "")), `Visits with a detection` = detections[sp],
          Detected = map_chr(sp, \(s) paste(comm_det_lp_by_habitat[[s]][c("Pastizales", "Ssp", "Bosque")], collapse = " / "))) %>%
-  select(-sp) %>%
-  # Non-breaking spaces keep the habitat order on one line when the header wraps
-  rename("Detected location-periods (pasture\u00a0/\u00a0silvopasture\u00a0/\u00a0forest)" = Detected)
+  select(-sp)
 
 ## Occupancy by habitat, single-species fits
 occ_by_habitat <- imap(ss_beta, \(b, sp) tibble(Species = species_label(sp), code = names(hab_labels), draws = map(code, \(h) pred_occ(b, h)))) %>%
@@ -231,31 +281,27 @@ occ_by_habitat <- imap(ss_beta, \(b, sp) tibble(Species = species_label(sp), cod
   summarise_draws() %>%
   mutate(Habitat = factor(hab_labels[code], hab_labels), Species = factor(Species, species_label(species_ss)))
 ## Pasture occupancy, single- vs multi-species, in the fits without canopy, as the forest-reference fits that replaced the earlier pasture-reference fit (the level every contrast against pasture is measured from)
-pasture_occ <- map(set_names(species_ss), \(sp) list(ss = pred_occ(if (sp == "Setophaga_striata") striata_nc$beta.samples else ss_beta[[sp]], "Pastizales"), ms = pred_occ(species_beta(ms_fit_nc)[[sp]], "Pastizales")))
+pasture_occ <- map(set_names(species_ss), \(sp) list(ss = pred_occ(if (sp == "Setophaga_striata") striata_nc$beta.samples else fits_oct15[[sp]]$beta.samples, "Pastizales"), ms = pred_occ(species_beta(ms_fit_nc)[[sp]], "Pastizales")))
 
-## Silvopasture contrasts per species, single- vs multi-species, with the community mean
-compare_tbl <- bind_rows(
-  imap(ss_contrasts, \(d, sp) tibble(Species = species_label(sp), Model = "Single-species", Contrast = names(d), draws = d)) %>% list_rbind(),
-  imap(ms_contrasts[species_ss], \(d, sp) tibble(Species = species_label(sp), Model = "Multi-species", Contrast = names(d), draws = d)) %>% list_rbind(),
-  tibble(Species = "Community mean", Model = "Multi-species", Contrast = names(comm_contrasts), draws = comm_contrasts)
-) %>%
-  filter(Contrast != "Forest vs pasture") %>%
-  summarise_draws() %>%
-  mutate(Species = factor(Species, rev(c(species_label(species_ss), "Community mean"))), Model = factor(Model, c("Single-species", "Multi-species")), Contrast = factor(Contrast, c("Silvopasture vs pasture", "Silvopasture vs forest")))
+## The six rarely detected migrants in the multi-species model: posterior median of each habitat coefficient (logit scale, forest as reference) minus the community-level mean
+rare_sp <- setdiff(Migrants, c(species_ss, "Catharus_ustulatus"))
+rare_dev <- \(term) map_dbl(set_names(rare_sp), \(sp) median(ms_fit$beta.samples[, paste0(term, "-", sp)]) - median(ms_fit$beta.comm.samples[, term]))
+rare_dev_pasture <- rare_dev("Habitat_frefPastizales")
+rare_dev_ssp <- rare_dev("Habitat_frefSsp")
+rare_top <- names(which.max(rare_dev_ssp))
 
-## Location-period table per species: habitat, signed distance to the forest edge (m; negative inside forest), silvopasture cover within 300 m (%), day of season and posterior mean latent occupancy (z), for the figure points
-signed_m <- (ss_l$occ.covs$Dist_open - ss_l$occ.covs$Dist_inside) * dist_sd_m
+## Location-period table per species: habitat, signed distance to the forest edge (m; negative inside forest), silvopasture cover within 300 m (%), day of season, posterior mean latent occupancy (z) and whether the species was detected at any visit (det), for the figure ticks
 ssp_pct <- ss_l$occ.covs$ssp * ssp_scale$SD + ssp_scale$Mean
-# Annual rainfall is one value per location, recycled down the period columns like habitat
-prec_mm <- matrix(as.numeric(ss_l$occ.covs$Tot_prec), nrow(surveyed_lp), ncol(surveyed_lp)) * prec_scale$SD + prec_scale$Mean
-canopy_pct <- ss_l$occ.covs[[paste0("Canopy_r", comm_radius)]] * canopy_scale$SD + canopy_scale$Mean
-lp_table <- \(z_mean, sp) tibble(Species = species_label(sp), Habitat = hab_labels[c(hab_lp)], m = c(signed_m), ssp = c(ssp_pct), prec = c(prec_mm), canopy = c(canopy_pct), day = c(ss_l$occ.covs$Day_season), z = c(z_mean), surveyed = c(surveyed_lp)) %>%
-  filter(surveyed) %>%
-  mutate(Habitat = factor(Habitat, hab_labels))
-lp_ss <- imap(fits, \(fit, sp) lp_table(apply(fit$z.samples, 2:3, mean), sp)) %>% list_rbind() %>% mutate(Species = factor(Species, species_label(species_ss)))
-ss_rain_fits <- map(set_names(species_ss), \(sp) readRDS(fit_path(sp, ss_rain_tag)))
-ss_rain_beta <- map(ss_rain_fits, \(m) m$beta.samples)
-lp_ss_rain <- imap(ss_rain_fits, \(fit, sp) lp_table(apply(fit$z.samples, 2:3, mean), sp)) %>% list_rbind() %>% mutate(Species = factor(Species, species_label(species_ss)))
+# Covariates from a data list: the default data (15 October window) or a fit's own; habitat and annual rainfall are one value per location, recycled down the period columns
+lp_table <- function(z_mean, sp, det = NA, dat = ss_l) {
+  oc <- dat$occ.covs
+  surveyed <- apply(dat$y, 1:2, \(v) any(!is.na(v)))
+  tibble(Species = species_label(sp), Habitat = hab_labels[rep(as.character(oc$Habitat), ncol(surveyed))], m = c(oc$Dist_open - oc$Dist_inside) * dist_sd_m, ssp = c(oc$ssp) * ssp_scale$SD + ssp_scale$Mean, prec = rep(as.numeric(oc$Tot_prec), ncol(surveyed)) * prec_scale$SD + prec_scale$Mean, canopy = c(oc[[paste0("Canopy_r", comm_radius)]]) * canopy_scale$SD + canopy_scale$Mean, day = c(oc$Day_season), z = c(z_mean), det = c(det), surveyed = c(surveyed)) %>%
+    filter(surveyed) %>%
+    mutate(Habitat = factor(Habitat, hab_labels))
+}
+lp_of_fits <- \(fit_l, data_l) imap(fit_l, \(fit, sp) lp_table(apply(fit$z.samples, 2:3, mean), sp, apply(fit$y, 1:2, \(v) any(v == 1, na.rm = TRUE)), data_l[[sp]]$ss_l)) %>% list_rbind() %>% mutate(Species = factor(Species, species_label(species_ss)))
+lp_ss <- lp_of_fits(fits, ss_data)
 
 ## Curve grid: each habitat over its observed range of one covariate (60 points), from a location-period table
 curve_grid <- \(lp, var) lp %>%
@@ -267,39 +313,43 @@ curve_grid <- \(lp, var) lp %>%
 ss_curves <- \(beta_l, lp, var) curve_grid(lp, var) %>%
   mutate(draws = pmap(list(Species, Habitat, x), \(sp, h, x) pred_at(beta_l[[str_replace(sp, " ", "_")]], h, var, x))) %>%
   summarise_draws()
-## Location-periods binned along one covariate within habitat, posterior mean latent occupancy, for the figure points
-lp_bins <- \(lp, var, width) lp %>%
-  mutate(Bin = cut_width(.data[[var]], width, boundary = 0)) %>%
-  summarise(x = mean(.data[[var]]), n = n(), z = mean(z), .by = c(Species, Habitat, Bin))
 ssp_tbl <- ss_curves(ss_beta, lp_ss, "ssp")
-ssp_points <- lp_bins(lp_ss, "ssp", 10)
-dist_tbl <- ss_curves(ss_beta, lp_ss, "m")
-dist_points <- lp_bins(lp_ss, "m", 50)
-rain_tbl <- ss_curves(ss_rain_beta, lp_ss_rain, "prec")
-rain_points <- lp_bins(lp_ss_rain, "prec", 200)
 
 ## Community-level curves (main text, multi-species fits): within each posterior draw, the mean across the migrants of each species' predicted occupancy, as in the 98-species report; faint lines are each species' posterior median curve
 ms_rain <- readRDS(fit_path("10_boreal_migrants", ms_rain_tag))
 ms_rain_beta <- species_beta(ms_rain)
-lp_all <- lp_table(NA, species_ss[1]) %>% select(-Species)
+# Curve ranges from each fit's own data: the 24 September season with pasture (base model) or without it (rainfall fit)
+lp_comm <- lp_table(NA, "Community", dat = list(occ.covs = comm_l$occ.covs, y = comm_l$y[1, , , ])) %>% select(-Species)
+lp_comm_nopast <- lp_table(NA, "Community", dat = comm_nopast$ss_l) %>% select(-Species)
 context_specs <- tribble(
-  ~Panel, ~var, ~beta_l,
-  "(a) Annual rainfall (mm)", "prec", ms_rain_beta,
-  "(b) Distance to forest edge (m)", "m", ms_beta,
-  "(c) Silvopasture within 300 m (%)", "ssp", ms_beta,
-  paste0("(d) Canopy cover within ", comm_radius / 1000, " km (%)"), "canopy", ms_beta
+  ~Panel, ~var, ~beta_l, ~lp,
+  "(a) Annual rainfall (mm)", "prec", ms_rain_beta, lp_comm_nopast,
+  "(b) Distance to forest edge (m)", "m", ms_beta, lp_comm,
+  paste0("(c) Canopy cover within ", comm_radius / 1000, " km (%)"), "canopy", ms_beta, lp_comm
 )
-context_draws <- pmap(context_specs, \(Panel, var, beta_l) curve_grid(lp_all, var) %>%
+context_draws <- pmap(context_specs, \(Panel, var, beta_l, lp) curve_grid(lp, var) %>%
   mutate(Panel = Panel, sp_draws = map2(Habitat, x, \(h, x) map(beta_l, \(b) pred_at(b, h, var, x))))) %>%
   list_rbind() %>%
   mutate(Panel = factor(Panel, context_specs$Panel))
 context_comm <- context_draws %>% mutate(draws = map(sp_draws, \(d) rowMeans(do.call(cbind, d)))) %>% select(-sp_draws) %>% summarise_draws()
 context_species <- context_draws %>% mutate(Species = map(sp_draws, names), med = map(sp_draws, \(d) map_dbl(d, median))) %>% select(-sp_draws) %>% unnest(c(Species, med))
-## Community-level means of the species' slopes (logit scale, per SD), and each habitat's rainfall slope in the rainfall fit (forest slope plus the habitat's difference)
+## Habitat use from the base multi-species model, community-level as above: occupancy in each habitat, and along silvopasture cover within 300 m averaged over the three habitats (equal weights); faint marks are each species' posterior medians
+comm_hab_draws <- tibble(code = names(hab_labels), sp_draws = map(code, \(h) map(ms_beta, \(b) pred_occ(b, h)))) %>% mutate(Habitat = factor(hab_labels[code], hab_labels))
+comm_by_habitat <- comm_hab_draws %>% mutate(draws = map(sp_draws, \(d) rowMeans(do.call(cbind, d)))) %>% select(-sp_draws) %>% summarise_draws()
+species_by_habitat <- comm_hab_draws %>% mutate(Species = map(sp_draws, names), med = map(sp_draws, \(d) map_dbl(d, median))) %>% select(-sp_draws) %>% unnest(c(Species, med))
+ssp_draws <- tibble(x = seq(min(lp_comm$ssp), max(lp_comm$ssp), length.out = 60)) %>% mutate(sp_draws = map(x, \(x) map(ms_beta, \(b) rowMeans(sapply(hab_labels, \(h) pred_at(b, h, "ssp", x))))))
+comm_ssp_curve <- ssp_draws %>% mutate(draws = map(sp_draws, \(d) rowMeans(do.call(cbind, d)))) %>% select(-sp_draws) %>% summarise_draws()
+species_ssp_curve <- ssp_draws %>% mutate(Species = map(sp_draws, names), med = map(sp_draws, \(d) map_dbl(d, median))) %>% select(-sp_draws) %>% unnest(c(Species, med))
+## Community-level means of the species' rainfall slopes (logit scale, per SD) in the rainfall fit: forest, and silvopasture (forest slope plus silvopasture's difference)
 comm_rain <- as.matrix(ms_rain$beta.comm.samples)
-rain_slopes <- \(b) list(Forest = b[, "Tot_prec"], Pasture = b[, "Tot_prec"] + b[, "Habitat_frefPastizales:Tot_prec"], Silvopasture = b[, "Tot_prec"] + b[, "Habitat_frefSsp:Tot_prec"])
-comm_rain_slopes <- rain_slopes(comm_rain)
-ss_rain_slopes <- map(ss_rain_beta, rain_slopes)
+comm_rain_slopes <- list(Forest = comm_rain[, "Tot_prec"], Silvopasture = comm_rain[, "Tot_prec"] + comm_rain[, "Habitat_frefSsp:Tot_prec"])
+## Convergence of the rainfall fit: largest Rhat of the community-level means, and the among-species variances above 1.1
+tau_rhat_rain <- set_names(ms_rain$rhat$tau.sq.beta, colnames(ms_rain$tau.sq.beta.samples))
+rain_rhat_means <- max(ms_rain$rhat$beta.comm)
+rain_rhat_high <- sort(tau_rhat_rain[tau_rhat_rain > 1.1], decreasing = TRUE)
+names(rain_rhat_high) <- c(Passage = "the passage indicator", Period_16_17 = "the 2016-17 period intercept", Arrival_nov15 = "the arrival indicator", Period_19_Early = "the 2019 period intercept")[names(rain_rhat_high)]
+# The text says no poorly mixing variance involves rainfall
+stopifnot(!anyNA(names(rain_rhat_high)), length(rain_rhat_high) == 2)
 
 ## Prior sensitivity (S. striata single-species and the multi-species model): silvopasture contrasts under each prior variance, with the default 2.72 from the base fits without canopy
 striata_prior <- map(set_names(prior_vars), \(v) contrasts_of(readRDS(fit_path("Setophaga_striata", paste0(ss_tag, "_bvar", v)))$beta.samples))
@@ -313,7 +363,7 @@ striata_old <- readRDS(fit_path("Setophaga_striata", "oct15_team_day_period_free
 ## Multi-species variants: silvopasture's own slope with distance outside forest, and silvopasture split into live fence and dispersed trees; WAIC on the same data as the base model, against the base model without canopy
 ms_dist <- readRDS(fit_path("10_boreal_migrants", "oct15_team_day_fref_dist_free_ig11"))
 ms_split <- readRDS(fit_path("10_boreal_migrants", "oct15_team_day_fref_split_free_ig11"))
-waic <- map_dbl(list(base = ms_fit_nc, dist = ms_dist, split = ms_split, rain = ms_rain), \(m) spOccupancy::waicOcc(m, by.sp = FALSE)[["WAIC"]])
+waic <- map_dbl(list(base = ms_fit_nc, dist = ms_dist, split = ms_split), \(m) spOccupancy::waicOcc(m, by.sp = FALSE)[["WAIC"]])
 rhat_comm <- \(m) max(unlist(m$rhat[c("beta.comm", "alpha.comm", "tau.sq.beta", "tau.sq.alpha")]), na.rm = TRUE)
 sp_draws <- \(m, term, sp) as.matrix(m$beta.samples)[, paste0(term, "-", sp)]
 comm_draws <- \(m, term) as.matrix(m$beta.comm.samples)[, term]
@@ -328,16 +378,16 @@ ms_c <- \(sp, k) est(ms_contrasts[[sp]][[k]])
 ss_b <- \(sp, term) est(ss_beta[[sp]][, term])
 occ_med <- \(x) sprintf("%.2f", median(x))
 
-## Single-species curves along one covariate, one panel per species, with the binned location-period points
-ss_plot <- function(curves, points, x_lab, edge = FALSE) {
+## Single-species curves along one covariate, one panel per species, with location-period ticks coloured by habitat: along the top those where the species was detected, along the bottom those where it was not
+ss_plot <- function(curves, lp, var, x_lab, edge = FALSE) {
   p <- ggplot(curves, aes(x, med, color = Habitat, fill = Habitat))
   if (edge) p <- p + geom_vline(xintercept = 0, linetype = "dashed", color = "grey50")
   p + geom_ribbon(aes(ymin = lcl, ymax = ucl), alpha = 0.12, color = NA) +
     geom_line(linewidth = 1) +
-    geom_point(data = points, aes(y = z, size = n), shape = 21, alpha = 0.7, stroke = 0.4, color = "grey20") +
+    geom_rug(data = filter(lp, det), aes(x = .data[[var]], color = Habitat), sides = "t", alpha = 0.7, length = unit(0.05, "npc"), inherit.aes = FALSE) +
+    geom_rug(data = filter(lp, !det), aes(x = .data[[var]], color = Habitat), sides = "b", alpha = 0.4, length = unit(0.05, "npc"), inherit.aes = FALSE) +
     facet_wrap(~ Species, nrow = 1) +
     scale_color_manual(values = hab_colors, aesthetics = c("color", "fill")) +
-    scale_size_area(max_size = 5, name = "Location-periods") +
     labs(x = x_lab, y = "Occupancy (use) probability") +
     theme_bw() + theme(legend.position = "top", legend.box = "vertical", legend.margin = margin(0, 0, 0, 0), strip.text = element_text(face = "italic"))
 }
@@ -358,9 +408,9 @@ comm_ring_sd <- Ring_sd$Ring_SD[Ring_sd$Radius_m == comm_radius]
 ms_ring_sp <- map(set_names(Migrants), \(sp) sp_draws(ms_ring, paste0("Canopy_r", comm_radius), sp) / comm_ring_sd * 10)
 ms_ring_sp_comm <- comm_draws(ms_ring, paste0("Canopy_r", comm_radius)) / comm_ring_sd * 10
 ms_ring_tau_sd <- sqrt(ms_ring$tau.sq.beta.samples[, paste0("Canopy_r", comm_radius)]) / comm_ring_sd * 10
-## S. striata's base fit (canopy at its radius, arrival indicator, full-length chains): canopy coefficient per 10 percentage points and WAIC against the same model without canopy
+## S. striata's base fit (canopy at its radius, arrival indicator, full-length chains): canopy coefficient per 10 percentage points, and WAIC against the same model without canopy on the 15 October window and 1 December arrival end (the ring profile's window; no fit without canopy on the species-specific window)
 striata_canopy <- fits$Setophaga_striata$beta.samples[, paste0("Canopy_r", striata_radius)] / Ring_sd$Ring_SD[Ring_sd$Radius_m == striata_radius] * 10
-striata_dwaic <- spOccupancy::waicOcc(fits$Setophaga_striata)[["WAIC"]] - spOccupancy::waicOcc(readRDS(fit_path("Setophaga_striata", striata_nc_arr_tag)))[["WAIC"]]
+striata_dwaic <- spOccupancy::waicOcc(fits_oct15$Setophaga_striata)[["WAIC"]] - spOccupancy::waicOcc(readRDS(fit_path("Setophaga_striata", striata_nc_arr_tag)))[["WAIC"]]
 ## Non-spatial check: the community radius with a location random effect in place of the spatial factor; canopy per 10 percentage points and WAIC against the non-spatial fit without canopy
 ms_nonsp <- readRDS(fit_path("10_boreal_migrants", ms_ring_nonsp_tag))
 nonsp_comm <- comm_draws(ms_nonsp, paste0("Canopy_r", comm_radius)) / comm_ring_sd * 10
@@ -370,7 +420,7 @@ nonsp_dwaic <- spOccupancy::waicOcc(ms_nonsp, by.sp = FALSE)[["WAIC"]] - spOccup
 r_20_10 <- cor(Ring_rows$Canopy_cover_ring[Ring_rows$Radius_m == 20000], Ring_rows$Canopy_cover_ring[Ring_rows$Radius_m == 10000])
 
 ## Migrants outside Meta: in-season visits (same Julian-day window as Meta) by ecoregion and habitat, and visits with a detection of each Nearctic-Neotropical migrant; a visit is one point count (location, date, start time)
-hab_short <- c(Bosque = "forest", Ssp = "silvopasture", Pastizales = "pasture")
+hab_short <- c(Pastizales = "pasture", Ssp = "silvopasture", Bosque = "forest")
 eco_label <- c(Piedemonte = "Meta (Piedemonte)", `Bajo magdalena` = "Bajo Magdalena", `Cordillera oriental` = "Cordillera Oriental", `Eje cafetero` = "Eje Cafetero", `Rio cesar` = "Río Cesar")
 visits_all <- read_csv(paste0(wrangling_dir, "Event_covs.csv"), show_col_types = FALSE) %>%
   filter(Julian_day >= Season_start | Julian_day <= Season_end) %>%
@@ -384,13 +434,13 @@ migrant_visits <- read_csv(paste0(wrangling_dir, "Bird_pcs/Bird_pcs_all.csv"), s
   filter(Species_ayerbe %in% long_distance) %>%
   distinct(Species_ayerbe, Id_survey, Date, Pc_start) %>%
   inner_join(visits_all, by = c("Id_survey", "Date", "Pc_start"))
-# One row per species: visits with a detection in Meta, outside Meta by habitat (forest / silvopasture / pasture, as in Table 1), and the ecoregions outside Meta where it was recorded
+# One row per species: visits with a detection in Meta, outside Meta by habitat (pasture / silvopasture / forest, as in Table 1), and the ecoregions outside Meta where it was recorded
 fsp_cell <- \(hab) paste(map_int(names(hab_short), \(h) sum(hab == h)), collapse = " / ")
 outside_tbl <- migrant_visits %>%
   summarise(Meta = sum(Ecoregion == "Piedemonte"), Outside = sum(Ecoregion != "Piedemonte"), Habitats = fsp_cell(Habitat[Ecoregion != "Piedemonte"]),
             Ecoregions = paste(map_chr(names(sort(table(Ecoregion[Ecoregion != "Piedemonte"]), decreasing = TRUE)), \(e) paste0(eco_label[[e]], " (", sum(Ecoregion == e), ")")), collapse = ", "),
             .by = Species_ayerbe) %>%
-  filter(Outside >= 2) %>%
+  filter(Outside >= 1) %>%
   arrange(desc(Outside)) %>%
   mutate(Mixed = Species_ayerbe %in% mixed_status, Modelled = str_replace(Species_ayerbe, " ", "_") %in% Migrants)
 # Survey effort: in-season point-count visits per ecoregion and habitat
@@ -398,26 +448,22 @@ effort_tbl <- visits_all %>% count(Ecoregion, Habitat) %>%
   mutate(Habitat = str_to_sentence(hab_short[Habitat]), Ecoregion = factor(eco_label[Ecoregion], eco_label)) %>%
   pivot_wider(names_from = Habitat, values_from = n, values_fill = 0) %>%
   arrange(Ecoregion) %>%
-  select(Ecoregion, Forest, Silvopasture, Pasture)
+  select(Ecoregion, Pasture, Silvopasture, Forest)
 # Text: share of detections outside Meta that were in forest, and in-season silvopasture and pasture visits outside Meta
 out_det <- filter(migrant_visits, Ecoregion != "Piedemonte")
 out_forest <- c(forest = sum(out_det$Habitat == "Bosque"), all = nrow(out_det))
 out_effort <- table(filter(visits_all, Ecoregion != "Piedemonte")$Habitat)
 
 # Captions with computed values (a colon inside an inline !expr would break the chunk-option YAML)
-outside_cap <- paste0("Nearctic-Neotropical migrants (AVONET long-distance migrants, excluding species with resident or austral-migrant populations in Colombia) recorded in at least 2 in-season point-count visits outside Meta: number of visits with a detection in Meta, outside Meta by habitat, and per ecoregion outside Meta; rows are ordered by the number of visits with a detection outside Meta. Season window as in Meta (", season_start_date, " to ", season_end_date, "), although passage timing may differ in other regions. Survey effort is in @tbl-effort. Asterisk: species in the Meta multi-species model; dagger: Colombian records may include resident populations.")
-data_cap <- paste0("Nearctic-Neotropical migrants in the multi-species model: visits with a detection within its season window (", comm_season_start_date, " to ", season_end_date, "), and location-periods with a detection in each habitat. Asterisk: species also fit with a single-species model.")
+outside_cap <- paste0("Nearctic-Neotropical migrants (AVONET long-distance migrants, excluding species with resident or austral-migrant populations in Colombia) recorded in at least one in-season point-count visit outside Meta: number of visits with a detection in Meta, outside Meta by habitat, and per ecoregion outside Meta; rows are ordered by the number of visits with a detection outside Meta. Season window as in Meta (", season_start_date, " to ", season_end_date, "), although passage timing may differ in other regions. Survey effort is in @tbl-effort. Asterisk: species in the Meta multi-species model; dagger: Colombian records may include resident populations.")
+data_cap <- paste0("Nearctic-Neotropical migrants in the multi-species model: visits with a detection within its season window (", comm_season_start_date, " to ", season_end_date, "), and point counts with a detection in each habitat. Asterisk: species also fit with a single-species model.")
 effort_cap <- paste0("Survey effort: in-season point-count visits (", season_start_date, " to ", season_end_date, ") per ecoregion and habitat, all species combined.")
-ring_cap <- paste0("Scale of effect of landscape canopy cover (ring around each point, inner 50 m excluded). Top: WAIC of the model with canopy in a ring of that outer radius minus WAIC of the same model without canopy (below 0, the ring improves the model). Bottom: canopy coefficient (logit scale, per 10 percentage points of ring cover; posterior median and 95% CrI), the community-level mean for the multi-species model ('Community'). Single- and multi-species fits with ", format(n_iter_short, big.mark = ",", scientific = FALSE), "-iteration chains.")
+ring_cap <- paste0("Scale of effect of landscape canopy cover (ring around each point, inner 50 m excluded). Top: WAIC of the model with canopy in a ring of that outer radius minus WAIC of the same model without canopy (below 0, the ring improves the model). Bottom: canopy coefficient (logit scale, per 10 percentage points of ring cover; posterior median and 95% CrI), the community-level mean for the multi-species model ('Community'). Solid line: multi-species model; dashed lines: single-species models. Single- and multi-species fits with ", format(n_iter_short, big.mark = ",", scientific = FALSE), "-iteration chains.")
 cond_text <- "in 2025-26 after arrival, other covariates at their means, spatial random effect at zero"
-# The rainfall fits still include day of season, held at the 2025-26 mean
-day_text <- paste0("; day of season at the 2025-26 mean (", day_ref_date, ")")
+comm_habitat_cap <- paste0("Community-level occupancy (use) of the ", length(Migrants), " migrants from the multi-species model (a) in each habitat and (b) along silvopasture cover within 300 m, averaged over the three habitats. Large points, bold line and band: within each posterior draw, the mean across species of each species' predicted occupancy (posterior median and 95% CrI); small points and faint lines: each species' posterior median. At the forest edge, ", cond_text, "; in (b) all habitats share one slope on the logit scale, and the curve spans the observed cover.")
 habitat_cap <- paste0("Predicted occupancy (use) in each habitat from the single-species models (posterior median and 95% CrI), at the forest edge, ", cond_text, ".")
-compare_cap <- "Silvopasture contrasts on the logit scale (posterior median and 95% CrI) from the single-species models, from the multi-species model, and the multi-species community mean (the average Nearctic-Neotropical migrant)."
-ssp_cap <- paste0("Occupancy (use) against silvopasture cover within 300 m from the single-species models (posterior median and 95% CrI), at the forest edge, ", cond_text, "; within each species the slope is shared by all habitats on the logit scale, so the curves differ in shape on the probability scale only because the habitats start at different occupancy levels (flattening near 0 or 1). Points binned by 10 percentage points. Points: location-periods binned within habitat, posterior mean latent occupancy from that species' fit, sized by location-periods; they carry their own period, date and covariates, so they need not sit on the curves.")
-context_cap <- paste0("Community-level occupancy (use) of the ", length(Migrants), " migrants in each habitat along (a) annual rainfall, from the multi-species model with a habitat-by-rainfall interaction, and (b) distance to the forest edge (negative = inside forest), (c) silvopasture cover within 300 m and (d) woody canopy cover within ", comm_radius / 1000, " km, from the additive multi-species model (the base model, with canopy). Bold lines and bands: within each posterior draw, the mean across species of each species' predicted occupancy (posterior median and 95% CrI); faint lines: each species' posterior median. ", sub("^in", "In", cond_text), "; in (a), day of season at the 2025-26 mean (", day_ref_date, "); in (b), distance enters as a hinge, with one slope for distance outside forest (shared by pasture and silvopasture) and one for depth inside forest, so the two sides of the edge can have different slopes, and in (c) and (d) all habitats share one slope on the logit scale. Each curve spans the values observed in that habitat.")
-dist_cap <- paste0("Occupancy (use) against distance to the forest edge from the single-species models (posterior median and 95% CrI), ", cond_text, ". Distance enters as a hinge, with one slope for distance outside forest (shared by pasture and silvopasture) and one for depth inside forest, so the two sides of the edge can have different slopes. Points binned by 50 m. ", "Points: location-periods binned within habitat, posterior mean latent occupancy from that species' fit, sized by location-periods; they carry their own period, date and covariates, so they need not sit on the curves.")
-rain_cap <- paste0("Occupancy (use) against annual rainfall from the single-species models with a habitat-by-rainfall interaction (posterior median and 95% CrI), at the forest edge, ", cond_text, day_text, ". Rainfall varies only between farms (", farms_by_habitat[["Ssp"]], " silvopasture farms). Points binned by 200 mm. ", "Points: location-periods binned within habitat, posterior mean latent occupancy from that species' fit, sized by location-periods; they carry their own period, date and covariates, so they need not sit on the curves.")
+ssp_cap <- paste0("Occupancy (use) against silvopasture cover within 300 m from the single-species models (posterior median and 95% CrI), at the forest edge, ", cond_text, ". The model has no habitat-by-cover interaction: within each species all habitats share one slope on the logit scale, and the curves differ in shape on the probability scale only because the habitats start at different occupancy levels (curves flatten near 0 or 1), not because of an interaction. Ticks: point counts where that species was detected (top) or not (bottom), coloured by habitat.")
+context_cap <- paste0("Community-level occupancy (use) of the ", length(Migrants), " migrants in each habitat along (a) annual rainfall, from the multi-species model with a habitat-by-rainfall interaction, fit without pasture (whose few detections could not support pasture-specific slopes), and (b) distance to the forest edge (negative = inside forest) and (c) woody canopy cover within ", comm_radius / 1000, " km, from the additive multi-species model with pasture. Bold lines and bands: within each posterior draw, the mean across species of each species' predicted occupancy (posterior median and 95% CrI); faint lines: each species' posterior median. ", sub("^in", "In", cond_text), "; in (b), distance enters as a hinge, with one slope for distance outside forest (shared by pasture and silvopasture) and one for depth inside forest; in (b) and (c) all habitats share each slope on the logit scale. Each curve spans the values observed in that habitat.")
 ```
 
 ## Abstract
@@ -426,64 +472,86 @@ rain_cap <- paste0("Occupancy (use) against annual rainfall from the single-spec
 
 **Motivation:** The multi-species model pools 98 species, so each species' habitat response is pulled toward the community mean, which makes the response of Nearctic-Neotropical migrants harder to determine. The functional trait models (Fig 7, preliminary results report) show that long-distance migrants' response to silvopasture relative to pasture trends more positive than that of resident species, but with wide uncertainty. Models geared specifically towards migrants allow for more tailored specification, as well as only including surveys conducted during the non-breeding season.
 
-**Methods:** Here I fit a multi-species occupancy model for the community of Nearctic-Neotropical migrants, as well as single-species models for three Nearctic-Neotropical migrants with enough detections (*Setophaga striata, Setophaga ruticilla*, *Piranga rubra*), asking (1) how occupancy differs between pasture, silvopasture and forest, (2) whether it changes with distance to the forest edge, silvopasture cover within 300m and rainfall, and (3) at what scale, if any, migrants respond to woody canopy cover in the surrounding landscape.
+**Methods:** Here we fit a multi-species occupancy model for the community of Nearctic-Neotropical migrants, as well as single-species models for three species (*Setophaga striata, Setophaga ruticilla*, *Piranga rubra*), asking whether (1) silvopastural systems influence occupancy (relative pasture and forest fragments), (2) whether occupancy changes with rainfall, distance to the forest edge, or landscape forest cover, and (3) at what scale, if any, migrants respond to woody canopy cover in the surrounding landscape.
 
-**Results:** The community of Nearctic-Neotropical migrants used silvopasture more than pasture (support), but tended to use it less than forest. Use was highest at the forest edge, declining both with distance into the open and with depth into forest (support for both), and there was moderate evidence that it rose with silvopasture cover within 300 m. There was also moderate evidence that use rose more steeply with annual rainfall in silvopasture than in pasture, the same direction as in the 98-species model. Results from the single-species models largely mirrored the multi-species model, which is not surprising given that these three species account for most detections, and nearly all of those outside forest: *S. ruticilla* also used silvopasture more than pasture (support), and *P. rubra* trended the same way. The Blackpoll warbler (*Setophaga striata*), the most commonly detected migrant in our study, responded most strongly to silvopasture, using it more than both pasture and forest (support for both). It was also the only species with a clear landscape scale: its use declined with woody canopy cover within `r ring_km(striata_radius)` (support). For the community, canopy cover within `r ring_km(comm_radius)` improved model fit because species responded in opposite directions (e.g., *S. striata* negatively, *Catharus ustulatus* positively).
+**Results:** The community of Nearctic-Neotropical migrants used silvopasture more than pasture, but tended to use it less than forest. Use was highest at the forest edge, declining both with distance into the open and with depth into forest, and there was moderate evidence that it rose with silvopasture cover within 300 m. Its response to annual rainfall did not clearly differ between silvopasture and forest. Results from the single-species models largely mirrored the multi-species model, which is not surprising given that these three species account for most detections, and nearly all the detections outside of forest: *S. ruticilla* also used silvopasture more than pasture, while *P. rubra*'s habitat contrasts were uncertain. *S. striata*, the most commonly detected migrant in our study, responded most strongly to silvopasture, using it more than both pasture and forest. It was also the only species with a clear landscape scale effect: its use declined with woody canopy cover within `r ring_km(striata_radius)`. For the community, canopy cover within `r ring_km(comm_radius)` improved model fit because species responded in opposite directions (e.g., *S. striata* negatively, *Catharus ustulatus* positively).
 
-**Conclusions:** Our findings suggest that the community of Nearctic-Neotropical migrants would benefit from converting pasture to silvopasture, although for the average migrant silvopasture does not replace forest. Our findings for S. striata coincide with those of Morales-Rozo et al. (2025), who found higher occupancy in agroforestry systems (shade-grown cacao, citrus, silvopasture) than in native forest, and lower occupancy with more forest at the landscape scale.
+**Conclusions:** Our findings suggest that the community of Nearctic-Neotropical migrants would benefit from converting pasture to silvopasture, although for the average migrant silvopasture does not replace forest. Our findings for *S. striata* coincide with those of Morales-Rozo et al. (2025), who found higher occupancy in agroforestry systems (shade-grown cacao, citrus, silvopasture) than in native forest, and lower occupancy with more forest at the landscape scale.
 
-## Data and model
+{{< pagebreak >}}
 
-**Survey data.** For the single-species models I used only visits between `r season_start_date` and `r season_end_date`, the non-breeding season (Meta has no April surveys); at the modelled locations, *S. striata* was not detected in the `r n_visits_before_first` visits from `r early_2019_dates` 2019, and its first autumn detection was on `r first_detection`. This leaves `r n_visits` visits at `r n_locations` locations in `r length(Periods_kept)` survey periods (`r period_text`). A location-period is one point-count location in one survey period; its visits are the repeat surveys from which detection is estimated. Location-periods had a median of `r mmm(lp_visits)` visits, and the visits to one location-period were close together: the first and last were a median of `r mmm(lp_span)` days apart, and only `r sum(lp_span >= 14)` of `r length(lp_span)` location-periods spanned 14 days or more. Survey effort (point counts) among habitats include: `r lp_by_habitat[["Bosque"]]` forest, `r lp_by_habitat[["Ssp"]]` silvopasture and `r lp_by_habitat[["Pastizales"]]` pasture location-periods on `r farms_by_habitat[["Bosque"]]`, `r farms_by_habitat[["Ssp"]]` and `r farms_by_habitat[["Pastizales"]]` farms. The 2016-17 periods surveyed almost only forest, so silvopasture and pasture come from November 2019 and January-February 2026. The multi-species model starts on `r comm_season_start_date` instead, the first migrant detection at the modelled locations, to keep the passage detections of *Contopus virens* (`r passage_detections[["Contopus_virens"]]` of its `r detections[["Contopus_virens"]]`) and *Catharus ustulatus* (`r passage_detections[["Catharus_ustulatus"]]` of `r detections[["Catharus_ustulatus"]]`). They come from GAICA's 2019 distance-gradient surveys, at locations not surveyed later in the season, so the multi-species model has `r comm_n_visits` visits at `r comm_n_locations` locations, including `r passage_lp[["Ssp"]]` silvopasture, `r passage_lp[["Bosque"]]` forest and `r passage_lp[["Pastizales"]]` pasture location-periods before `r passage_end_date`.
+## Methods
 
-**Multi-species model.** I fit a multi-season, multi-species spatial occupancy model (`spOccupancy::svcTMsPGOcc`) of the `r length(Migrants)` Nearctic-Neotropical migrants with at least 2 detections within the season window (@tbl-data), with Bernoulli occupancy and detection and logit links, to estimate the average migrant's response to silvopasture and how landscape and climatic context shape occupancy. Occupancy is modeled as a function of the predominant habitat within the 50-m point-count radius (forest as the reference), annual rainfall, distance to the forest edge, silvopasture cover within 300 m, woody canopy cover within `r ring_km(comm_radius)` ([Scale of effect of landscape canopy cover](#sec-scale)), survey period, and passage and arrival indicators. Each survey period has its own intercept (2025-26 as reference; the two 2016-17 periods share one), so habitat contrasts come from habitats surveyed in the same period rather than from differences between years. Two species-specific timing indicators separate low use by species not yet present from the habitat contrasts: passage, 1 for location-periods whose mean date falls before `r passage_end_date`, and arrival, 1 before `r comm_arrival_end_date` (including passage, so the passage coefficient is passage relative to arrival). A late arrival such as *S. striata* can thus be absent during passage while *C. ustulatus* is present ([Sensitivity checks](#sec-sensitivity)). Detection is modeled as a function of whether the point is in forest, the start time of the count and its square, and the collector team, with a team-specific slope of log sampling day that lets each team's detection improve over its first days in the field (warm-up). Each species' coefficients are drawn from a community normal distribution, whose mean describes the average migrant and whose variance (inverse-gamma(1, 1) prior) sets how strongly species are pulled toward that mean. One spatial factor shares residual spatial structure among species: a nearest-neighbour Gaussian process (NNGP, which conditions each location on its 5 nearest neighbours) with an exponential correlation function and an effective range free between `r free_range_km[1]` and `r free_range_km[2]` km, the largest distance between locations. Six of the ten species have at most `r max(detections[!names(detections) %in% c(species_ss, "Catharus_ustulatus")])` detections, so their estimates rest mostly on the community mean. The model ran `r Mcmc_long$n.chains` chains of `r format(n_iter_long, big.mark = ",", scientific = FALSE)` iterations (`r format(Mcmc_long$n.burn, big.mark = ",", scientific = FALSE)` burn-in, thinned by `r Mcmc_long$n.thin`), twice the single-species length, because the among-species variance of the silvopasture coefficient mixed poorly at the standard length; the largest community-level Rhat was `r sprintf("%.2f", max_rhat_comm)`, for a detection term (the among-species variance of a collector team's warm-up slope), and `r sprintf("%.2f", max_rhat_comm_occ)` among the occupancy terms; `r if (n_sp_rhat == 0) "no" else n_sp_rhat` species coefficients had Rhat above 1.1.
+### Survey data
 
-**Single-species models.** For the three migrants detected often enough outside forest to estimate habitat contrasts (*S. striata*, *S. ruticilla* and *P. rubra*), I also fit single-species versions of the same model (`spOccupancy::stPGOcc`), each with its own spatial random effect, and with canopy cover only for *S. striata*, within `r ring_km(striata_radius)` (no radius improved the *S. ruticilla* or *P. rubra* models). Each ran `r Mcmc$n.chains` chains of `r format(n_iter, big.mark = ",", scientific = FALSE)` iterations (`r format(Mcmc$n.burn, big.mark = ",", scientific = FALSE)` burn-in, thinned by `r Mcmc$n.thin`); the largest Rhat across all parameters of the three fits was `r sprintf("%.2f", max_rhat_ss)`.
+We used point counts conducted between `r comm_season_start_date`, the first migrant detection at our survey locations, and `r season_end_date`, the end of the non-breeding season in our data (Meta has no April surveys). Each point count location was visited repeatedly within a survey period, and we refer to a location surveyed in one period as a point count. The data comprise `r comm_n_visits` visits at `r comm_n_locations` locations in `r length(Periods_kept)` survey periods (`r period_text`), giving `r comm_lp_by_habitat[["Bosque"]]` forest, `r comm_lp_by_habitat[["Ssp"]]` silvopasture and `r comm_lp_by_habitat[["Pastizales"]]` pasture point counts on `r comm_farms_by_habitat[["Bosque"]]`, `r comm_farms_by_habitat[["Ssp"]]` and `r comm_farms_by_habitat[["Pastizales"]]` farms, respectively. Point counts received a median of `r median(comm_lp_visits)` visits, and the first and last visits were a median of `r median(comm_lp_span)` days apart (maximum `r max(comm_lp_span)` days). The 2016-17 surveys were almost entirely in forest, so the silvopasture and pasture data come from 2019 and 2026.
 
-**Occupancy as use.** Wintering migrants may move among points between visits. If they do, closure is violated: occupancy then estimates the probability that a location was *used* during the location-period, and detection estimates availability times detectability (Rota et al. 2009). Most location-periods were surveyed within a few days, which limits this, but I read occupancy as use of a location during the non-breeding season.
+### Multi-species occupancy model
 
-**Notation.** Estimates are given as the posterior median followed by the 95% credible interval (CrI), and in the text by the posterior probability that the quantity is positive, e.g. `r est(ss_contrasts$Setophaga_striata[["Silvopasture vs pasture"]])` for *S. striata*'s silvopasture vs pasture contrast on the logit scale. I treat a posterior probability of a positive effect, P(\>0), of at least 0.95 (or at most 0.05) as support for an effect, and of 0.80–0.95 (or 0.05–0.20) as moderate evidence; weaker effects are described as trends.
+We fit a multi-season, multi-species spatial occupancy model (`spOccupancy::svcTMsPGOcc`) to the `r length(Migrants)` Nearctic-Neotropical migrants with at least 2 detections (@tbl-data), with Bernoulli occupancy and detection and logit links. Each species' coefficients were drawn from a community-level normal distribution, whose mean describes the average migrant and whose variance (inverse-gamma(1, 1) prior) sets how strongly species are pulled toward that mean.
 
-## Habitat
+Occupancy was modelled as a function of the predominant habitat within the 50-m point-count radius (forest as the reference level), annual rainfall, distance to the forest edge, silvopasture cover within 300 m, woody canopy cover within `r ring_km(comm_radius)` ([Scale of effect of landscape canopy cover](#sec-scale-methods)), and survey period (the two 2016-17 periods sharing one intercept). Detection was modelled as a function of whether the point was in forest, the start time of the count and its square, and the collector team, with a team-specific slope of log sampling day that lets each team's detection improve over its first days in the field.
+
+To allow for differences in migratory schedule among species, we also included two timing indicators, assigned by the mean survey date of each point count. Point counts before `r comm_arrival_end_date` were considered arrival surveys, and those before `r passage_end_date` were also coded as passage surveys, leaving point counts from `r comm_arrival_end_date` to `r season_end_date` (the stationary wintering period) as the reference. The arrival coefficient therefore contrasts arrival with stationary wintering, and the passage coefficient accounts for any additional flux of migrants during passage. This allows the passage detections of early migrants (e.g., *C. ustulatus*, `r passage_detections[["Catharus_ustulatus"]]` of its `r detections[["Catharus_ustulatus"]]` detections) to be modelled fully while leaving the estimates for late migrants largely unchanged. For example, compared with the same model fit from `r passage_end_date`, no habitat contrast of *S. striata* (which was never detected during passage) moved by more than `r sprintf("%.2f", passage_shift[["striata"]])` on the logit scale, and no community-level mean contrast by more than `r sprintf("%.2f", passage_shift[["comm"]])`.
+
+A single spatial factor captured residual spatial structure shared among species, modelled as a nearest-neighbour Gaussian process (5 neighbours) with an exponential correlation function and a uniform prior on the effective range between `r free_range_km[1]` and `r free_range_km[2]` km, the largest distance between locations. The estimated effective range was short but uncertain, with a long upper tail (posterior median `r sprintf("%.1f", median(eff_range_km))` km, mean `r sprintf("%.1f", mean(eff_range_km))` km, 95% CrI `r sprintf("%.1f", quantile(eff_range_km, 0.025))` to `r sprintf("%.1f", quantile(eff_range_km, 0.975))` km). We ran `r Mcmc_long$n.chains` chains of `r format(n_iter_long, big.mark = ",", scientific = FALSE)` iterations (`r format(Mcmc_long$n.burn, big.mark = ",", scientific = FALSE)` burn-in, thinned by `r Mcmc_long$n.thin`). The largest community-level Rhat was `r sprintf("%.2f", max_rhat_comm)`, for the among-species variance of a collector team's warm-up slope, and `r sprintf("%.2f", max_rhat_comm_occ)` among the occupancy terms; `r if (n_sp_rhat == 0) "no" else n_sp_rhat` species coefficients had Rhat above 1.1.
+
+### Single-species models
+
+Because each species' estimates in the multi-species model are partially pooled toward the community-level mean, we checked the habitat-use results with single-species versions of the same model (`spOccupancy::stPGOcc`), each with its own spatial random effect, for the three migrants detected often enough outside forest to estimate habitat contrasts (*S. striata*, *S. ruticilla* and *P. rubra*). These models were additive, with forest again as the reference level, and included canopy cover only for *S. striata* (within `r ring_km(striata_radius)`), as no radius improved the *S. ruticilla* or *P. rubra* models.
+
+Each species had its own survey window concordant with its migration ecology. *S. ruticilla* and *P. rubra* start on `r data_summary$Setophaga_ruticilla$start`, as in the multi-species model, whereas *S. striata* starts on `r data_summary$Setophaga_striata$start`, as it was not detected in the `r n_visits_before_first` visits from `r early_2019_dates` 2019 (first autumn detection on `r first_detection`). Each window ends at the end of the species' non-breeding season according to eBird Status and Trends (*S. striata* `r data_summary$Setophaga_striata$end`, *S. ruticilla* `r data_summary$Setophaga_ruticilla$end`, *P. rubra* `r data_summary$Piranga_rubra$end`), so that March visits after a species has left are not treated as non-use. An arrival indicator variable, from the survey start date to the start of its stationary non-breeding season (`r data_summary$Setophaga_striata$arrival_end`, `r data_summary$Setophaga_ruticilla$arrival_end` and `r data_summary$Piranga_rubra$arrival_end`, respectively), accounts for changes in migrant occupancy as birds are arriving on the wintering grounds. This leaves `r data_summary$Setophaga_striata$n_visits` visits at `r data_summary$Setophaga_striata$n_locations` locations for *S. striata*, `r data_summary$Setophaga_ruticilla$n_visits` at `r data_summary$Setophaga_ruticilla$n_locations` for *S. ruticilla* and `r data_summary$Piranga_rubra$n_visits` at `r data_summary$Piranga_rubra$n_locations` for *P. rubra*.
+
+Few pasture point counts had a detection of any of the three species (@tbl-data), so pasture occupancy is weakly identified. As a sensitivity check, we refit *S. striata* models with pasture as the reference level (instead of forest), or with a different prior variance, to determine how that influenced our habitat contrasts. The direction of every silvopasture contrast remained unchanged, but the size of the contrast against pasture depended on these choices (`r sens_ref`). We did not run these checks for *S. ruticilla* and *P. rubra*, whose pasture estimates rest on even fewer detections and are likely at least as sensitive. Each model ran `r Mcmc$n.chains` chains of `r format(n_iter, big.mark = ",", scientific = FALSE)` iterations (`r format(Mcmc$n.burn, big.mark = ",", scientific = FALSE)` burn-in, thinned by `r Mcmc$n.thin`), and the largest Rhat across all parameters of the three fits was `r sprintf("%.2f", max_rhat_ss)`.
+
+### Habitat-specific response to rainfall
+
+The models above are additive, so all habitats share one slope for each covariate. To ask whether migrants respond to rainfall differently in silvopasture and forest, we fit a further multi-species model with a habitat-by-rainfall interaction and without pasture, which has too few detections to support its own slope. Rainfall varies only between farms, but the `r comm_season_start_date` season, whose passage surveys add farms, includes `r comm_nopast_farms[["Ssp"]]` silvopasture and `r comm_nopast_farms[["Bosque"]]` forest farms. In this model the community-level means converged (largest Rhat `r sprintf("%.2f", rain_rhat_means)`), but the among-species variances of `r paste0(names(rain_rhat_high), " (Rhat ", sprintf("%.2f", rain_rhat_high), ")", collapse = " and ")` mixed poorly; neither involves rainfall.
+
+### Scale of effect of landscape canopy cover {#sec-scale-methods}
+
+To find the scale at which migrants respond to landscape tree cover, we added woody canopy cover (survey-year maps) in a ring around each point to the additive models, one fit per outer radius: the `r length(Ring_radii_m) - 1` radii of the 98-species scale-of-effect analysis (`r min(Ring_radii_m)` m to 10 km) and 20 km, since migrants may perceive the landscape at large scales. Rings exclude the inner 50 m so that they do not duplicate the point's own habitat, and each radius was standardised over the `r nrow(Stacked_oc)` surveyed point counts of the 98-species data. We compared each fit by WAIC with the same model without canopy.
+
+### Inference
+
+We report the posterior median followed by the 95% credible interval (CrI) and, in the text, the posterior probability that the quantity is positive, e.g. `r est(ss_contrasts$Setophaga_striata[["Silvopasture vs pasture"]])` for *S. striata*'s silvopasture vs pasture contrast on the logit scale. We treat P(\>0) of at least 0.95 (or at most 0.05) as support for an effect and 0.80–0.95 (or 0.05–0.20) as moderate evidence, and describe weaker effects as trends.
+
+## Results
+
+### Habitat use
 
 ```{r}
 #| label: tbl-data
 #| tbl-cap: !expr data_cap
-kable(data_tbl)
+report_table(data_tbl, c("Species", "Visits with\na detection", "Point counts with a detection\n(pasture / silvopasture / forest)"), align = "lcc", widths = c("4cm", NA, NA))
 ```
 
-In the multi-species model, the average Nearctic-Neotropical migrant used silvopasture more than pasture (community-level mean contrast `r est(comm_contrasts[["Silvopasture vs pasture"]])`) but not more than forest (`r est(comm_contrasts[["Silvopasture vs forest"]])`) (@fig-compare). *S. striata* stands out from the community by using silvopasture more than forest (silvopasture vs pasture `r ms_c("Setophaga_striata", "Silvopasture vs pasture")`, silvopasture vs forest `r ms_c("Setophaga_striata", "Silvopasture vs forest")`).
-
 ```{r}
-#| label: fig-compare
-#| fig-cap: !expr compare_cap
-#| fig-height: 3.4
-ggplot(compare_tbl, aes(med, Species, color = Model)) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey50") +
-  geom_pointrange(aes(xmin = lcl, xmax = ucl), position = position_dodge(width = 0.5)) +
-  facet_wrap(~ Contrast, scales = "free_x") +
-  scale_color_manual(values = c(`Single-species` = "grey30", `Multi-species` = "#6250d6"), name = NULL) +
-  labs(x = "Contrast (logit scale)", y = NULL) +
-  theme_bw() + theme(legend.position = "top", axis.text.y = element_text(face = c("plain", rep("italic", length(species_ss)))))
-```
-
-The single-species models agree with the multi-species model (@fig-compare, @fig-habitat). *S. striata* used silvopasture far more than pasture (`r ss_c("Setophaga_striata", "Silvopasture vs pasture")`) and probably more than forest (`r ss_c("Setophaga_striata", "Silvopasture vs forest")`), in line with Morales-Rozo et al. (2025). *S. ruticilla* also used silvopasture more than pasture (`r ss_c("Setophaga_ruticilla", "Silvopasture vs pasture")`), but tended to use forest more than silvopasture (`r ss_c("Setophaga_ruticilla", "Silvopasture vs forest")`). *P. rubra*'s habitat contrasts were uncertain (silvopasture vs pasture `r ss_c("Piranga_rubra", "Silvopasture vs pasture")`).
-
-```{r}
-#| label: fig-habitat
-#| fig-cap: !expr habitat_cap
+#| label: fig-comm-habitat
+#| fig-cap: !expr comm_habitat_cap
 #| fig-height: 3.2
-ggplot(occ_by_habitat, aes(Habitat, med, color = Habitat)) +
-  geom_pointrange(aes(ymin = lcl, ymax = ucl)) +
-  facet_wrap(~ Species, nrow = 1) +
+p_habitat <- ggplot(comm_by_habitat, aes(Habitat, med, color = Habitat)) +
+  geom_point(data = species_by_habitat, position = position_jitter(width = 0.15, height = 0, seed = 1), alpha = 0.4, size = 1) +
+  geom_pointrange(aes(ymin = lcl, ymax = ucl), size = 0.5) +
   scale_color_manual(values = hab_colors, guide = "none") +
-  labs(x = NULL, y = "Occupancy (use) probability") +
-  theme_bw() + theme(strip.text = element_text(face = "italic"), axis.text.x = element_text(angle = 30, hjust = 1))
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(x = NULL, y = "Occupancy (use) probability", tag = "(a)") +
+  theme_bw()
+p_cover <- ggplot(comm_ssp_curve, aes(x, med)) +
+  geom_line(data = species_ssp_curve, aes(group = Species), linewidth = 0.3, alpha = 0.3) +
+  geom_ribbon(aes(ymin = lcl, ymax = ucl), alpha = 0.15) +
+  geom_line(linewidth = 1.2) +
+  scale_y_continuous(limits = c(0, 1)) +
+  labs(x = "Silvopasture within 300 m (%)", y = NULL, tag = "(b)") +
+  theme_bw() + theme(plot.margin = margin(5.5, 12, 5.5, 5.5))
+patchwork::wrap_plots(p_habitat, p_cover, nrow = 1)
 ```
 
-Only `r det_lp_by_habitat$Setophaga_striata[["Pastizales"]]` of `r lp_by_habitat[["Pastizales"]]` pasture location-periods had an *S. striata* detection, so pasture occupancy is weakly identified: the direction of every silvopasture contrast is robust, but the size of contrasts against pasture depends on the prior and the reference level ([Sensitivity checks](#sec-sensitivity)).
+The average Nearctic-Neotropical migrant used silvopasture more than pasture (community-level mean contrast `r est(comm_contrasts[["Silvopasture vs pasture"]])`) but not more than forest (`r est(comm_contrasts[["Silvopasture vs forest"]])`; @fig-comm-habitat a), and there was moderate evidence that use rose with silvopasture cover within 300 m (community-level mean slope per SD of cover, `r round(ssp_scale$SD)` percentage points, `r est(comm_beta[, "ssp"])`; @fig-comm-habitat b). Six of the ten species had at most `r max(detections[rare_sp])` detections, and their pasture coefficients barely departed from the community-level mean (each within `r sprintf("%.1f", max(abs(rare_dev_pasture)))` on the logit scale), so the data say little about how these species use pasture. Their silvopasture coefficients varied more, from `r sprintf("%.1f", min(rare_dev_ssp))` to `r sprintf("%+.1f", max(rare_dev_ssp))` around the community-level mean. Of these six, *`r species_label(rare_top)`* leaned most toward silvopasture (silvopasture vs forest `r est(ms_contrasts[[rare_top]][["Silvopasture vs forest"]])`), though `r passage_detections[[rare_top]]` of its `r detections[[rare_top]]` detections came during passage.
 
-## Landscape context
+The single-species models largely agreed with the multi-species model (@fig-habitat). *S. striata* stood out from the community by using silvopasture more than both pasture (`r ss_c("Setophaga_striata", "Silvopasture vs pasture")`) and forest (`r ss_c("Setophaga_striata", "Silvopasture vs forest")`), in line with Morales-Rozo et al. (2025). *S. ruticilla* also used silvopasture more than pasture (`r ss_c("Setophaga_ruticilla", "Silvopasture vs pasture")`), with moderate evidence that it used forest more than silvopasture (`r ss_c("Setophaga_ruticilla", "Silvopasture vs forest")`). *P. rubra*'s habitat contrasts were uncertain due to low sample sizes. In the single-species models, use rose with silvopasture cover within 300 m for *P. rubra* (`r ss_b("Piranga_rubra", "ssp")`) and *S. striata* (`r ss_b("Setophaga_striata", "ssp")`), with moderate evidence for *S. ruticilla* (`r ss_b("Setophaga_ruticilla", "ssp")`) (@fig-ssp).
+
+### Landscape context
 
 ```{r}
 #| label: fig-context
@@ -500,15 +568,11 @@ ggplot(context_comm, aes(x, med, color = Habitat, fill = Habitat)) +
   theme_bw() + theme(legend.position = "top", strip.placement = "outside", strip.background = element_blank())
 ```
 
-**Rainfall.** In the multi-species model with a habitat-by-rainfall interaction (`r format(n_iter_mid, big.mark = ",", scientific = FALSE)` iterations per chain; largest community-level Rhat `r sprintf("%.2f", rhat_comm(ms_rain))`), the community-level mean of the species' rainfall slopes (logit scale, per SD of annual rainfall, `r round(prec_scale$SD)` mm) was `r est(comm_rain_slopes$Silvopasture)` in silvopasture, `r est(comm_rain_slopes$Pasture)` in pasture and `r est(comm_rain_slopes$Forest)` in forest (@fig-context a). The silvopasture slope exceeded the pasture slope by `r est(comm_rain_slopes$Silvopasture - comm_rain_slopes$Pasture)`, the same direction as the habitat-by-rainfall interaction in the 98-species model, but not clearly, and the interaction did not improve WAIC (`r sprintf("%.1f", waic[["rain"]])` vs `r sprintf("%.1f", waic[["base"]])` for the additive model). The single-species fits agree in direction: the silvopasture slope was positive for all three species, clearly only for *S. ruticilla* (*S. striata* `r est(ss_rain_slopes$Setophaga_striata$Silvopasture)`, *S. ruticilla* `r est(ss_rain_slopes$Setophaga_ruticilla$Silvopasture)`, *P. rubra* `r est(ss_rain_slopes$Piranga_rubra$Silvopasture)`), while the pasture slopes spanned zero (@fig-rain-ss). Their forest slopes (`r paste(map_chr(species_ss, \(sp) sprintf("%.2f", median(ss_rain_slopes[[sp]]$Forest))), collapse = ", ")`) are steeper than the same species' forest slopes in the multi-species model (`r paste(map_chr(species_ss, \(sp) sprintf("%.2f", median(ms_rain_beta[[sp]][, "Tot_prec"]))), collapse = ", ")`), which are pulled toward the community-level mean forest slope set mostly by the rarely detected, forest-only species. Rainfall varies only between farms, so each silvopasture slope rests on `r farms_by_habitat[["Ssp"]]` farms.
+The average migrant's response to rainfall did not clearly differ between silvopasture and forest (@fig-context a): the community-level mean rainfall slope in silvopasture differed from that in forest by `r est(comm_rain[, "Habitat_frefSsp:Tot_prec"])` (logit scale, per SD of annual rainfall, `r round(prec_scale$SD)` mm). In the additive single-species models, habitat use rose with rainfall for all three species (P(\>0) = `r sprintf("%.2f", mean(ss_beta$Setophaga_striata[, "Tot_prec"] > 0))` for *S. striata*, `r sprintf("%.2f", mean(ss_beta$Setophaga_ruticilla[, "Tot_prec"] > 0))` for *S. ruticilla* and `r sprintf("%.2f", mean(ss_beta$Piranga_rubra[, "Tot_prec"] > 0))` for *P. rubra*).
 
-**Distance to the forest edge and silvopasture cover.** In the additive multi-species model, the community-level mean slope with distance outside forest (shared by pasture and silvopasture) was `r est(comm_beta[, "Dist_open"])` per SD (`r round(dist_sd_m)` m), and with depth inside forest `r est(comm_beta[, "Dist_inside"])`: the average migrant's use was highest at the forest edge (@fig-context b). The community-level mean slope of silvopasture cover within 300 m was `r est(comm_beta[, "ssp"])` per SD (`r round(ssp_scale$SD)` percentage points) (@fig-context c). Use changed little with woody canopy cover within `r ring_km(comm_radius)` for the average migrant (community-level mean `r est(ms_ring_sp_comm)` per 10 percentage points), but species differed in direction (@fig-context d; [Scale of effect of landscape canopy cover](#sec-scale)).
+The average migrant's use was highest at the forest edge (@fig-context b), with support for a decline on both sides: the community-level mean slope per SD of distance (`r round(dist_sd_m)` m) was `r est(comm_beta[, "Dist_open"])` into the open (pasture and silvopasture) and `r est(comm_beta[, "Dist_inside"])` inside forest.
 
-Among the single-species fits, use rose with silvopasture cover within 300 m for *P. rubra* (`r ss_b("Piranga_rubra", "ssp")`) and *S. striata* (`r ss_b("Setophaga_striata", "ssp")`), but not clearly for *S. ruticilla* (`r ss_b("Setophaga_ruticilla", "ssp")`) (@fig-ssp). Outside forest, use declined away from the forest edge for *S. ruticilla* (`r ss_b("Setophaga_ruticilla", "Dist_open")`) and tended to for *P. rubra* (`r ss_b("Piranga_rubra", "Dist_open")`), but not for *S. striata* (`r ss_b("Setophaga_striata", "Dist_open")`), whose use instead tended to decline with depth inside forest (`r ss_b("Setophaga_striata", "Dist_inside")`) (@fig-dist).
-
-## Scale of effect of landscape canopy cover {#sec-scale}
-
-**Approach.** Morales-Rozo et al. (2025) found lower *S. striata* occupancy with more forest within 1 km. To find the scale at which migrants respond to landscape tree cover, I added woody canopy cover (survey-year maps) in a ring around each point to the additive models above, one fit per outer radius: the `r length(Ring_radii_m) - 1` radii of the 98-species scale-of-effect fits (`r min(Ring_radii_m)` m to 10 km) and 20 km, since migrants may perceive the landscape at large scales, though the study extent (at most `r free_range_km[2]` km between locations) leaves little contrast beyond that: the 20 km ring correlates `r sprintf("%.2f", r_20_10)` with the 10 km ring. Rings exclude the inner 50 m, so they do not duplicate the point's own habitat, and each radius is standardised over the `r nrow(Stacked_oc)` surveyed location-periods of the 98-species data. Each fit was compared by WAIC with the same model without canopy. To save time these fits used `r format(n_iter_short, big.mark = ",", scientific = FALSE)`-iteration chains; the community's two best radii and *S. striata*'s best radius were refit with the full chains. The profiles were fit before day of season was dropped, so they include it; the chosen radii were then refit with the arrival indicator as the base models.
+### Scale of effect of landscape canopy cover {#sec-scale}
 
 ```{r}
 #| label: fig-ring
@@ -519,95 +583,78 @@ ring %>%
   pivot_longer(c(dWAIC, Canopy_median), names_to = "name", values_to = "value") %>%
   mutate(lo = if_else(name == "dWAIC", NA_real_, Canopy_lo), hi = if_else(name == "dWAIC", NA_real_, Canopy_hi),
          name = recode(name, dWAIC = "WAIC minus WAIC without canopy", Canopy_median = "Canopy coefficient (logit, per 10 percentage points)"),
-         Species = str_replace(Species, "_", " ")) %>%
+         Species = str_replace(Species, "_", " "), Model = if_else(Species == "Community", "Multi-species", "Single-species"), name = fct_relevel(name, "WAIC minus WAIC without canopy")) %>%
   ggplot(aes(x = Radius_m / 1000, y = value, colour = Species)) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey50") +
   geom_pointrange(aes(ymin = lo, ymax = hi), position = position_dodge(width = 0.08), na.rm = TRUE, size = 0.3) +
-  geom_line(position = position_dodge(width = 0.08)) +
+  geom_line(aes(linetype = Model), position = position_dodge(width = 0.08)) +
+  scale_linetype_manual(values = c(`Multi-species` = "solid", `Single-species` = "dashed"), guide = "none") +
+  # Community in black so it stands apart from the species; species colours avoid the habitat palette of the other figures
+  scale_colour_manual(values = c(Community = "black", `Piranga rubra` = "#0072B2", `Setophaga ruticilla` = "#D55E00", `Setophaga striata` = "#CC79A7"), labels = \(x) parse(text = if_else(x == "Community", x, paste0("italic('", x, "')")))) +
   scale_x_log10() +
   facet_wrap(~ name, ncol = 1, scales = "free_y") +
   labs(x = "Outer ring radius (km)", y = NULL, colour = NULL) +
   theme_bw() + theme(legend.position = "top")
 ```
 
-**Results.** For the community, WAIC improved most at `r ring_km(ring_best("Community")$Radius_m)` (ΔWAIC `r ring_dw("Community", comm_radius)`; `r ring_dw("Community", comm_radius, "full")` with full chains), with 2 and 5 km close behind. In the base multi-species model, the community-level mean canopy coefficient was negative but unclear (`r est(ms_ring_sp_comm)` per 10 percentage points), and the among-species SD of the canopy coefficient was large (`r ci(ms_ring_tau_sd)`): the model gains from canopy because species respond differently, not through a shared response. *S. striata* (`r est(ms_ring_sp$Setophaga_striata)`) and *C. ustulatus* (`r est(ms_ring_sp$Catharus_ustulatus)`) respond in opposite directions, while *S. ruticilla* (`r est(ms_ring_sp$Setophaga_ruticilla)`) and *P. rubra* (`r est(ms_ring_sp$Piranga_rubra)`) tend to respond positively, and the six rare species lean negative with wide intervals.
+For the community, WAIC improved most at `r ring_km(ring_best("Community")$Radius_m)` (ΔWAIC `r ring_dw("Community", comm_radius)`), with 2 and 5 km close behind. Use changed little with canopy cover for the average migrant (community-level mean `r est(ms_ring_sp_comm)` per 10 percentage points; @fig-context c), but the among-species SD of the canopy coefficient was large (`r ci(ms_ring_tau_sd)`), suggesting that species respond to landscape forest cover in different directions rather than in a shared way. For example, *S. striata* (`r est(ms_ring_sp$Setophaga_striata)`) and *C. ustulatus* (`r est(ms_ring_sp$Catharus_ustulatus)`) responded in opposite directions, and the six rarely detected species leaned negative with wide intervals.
 
-Among the single-species models, *S. striata* has the only clear scale (@fig-ring): WAIC falls smoothly from 1 km to a minimum at `r ring_km(ring_best("Setophaga_striata")$Radius_m)` (ΔWAIC `r ring_dw("Setophaga_striata", striata_radius)`) and rises again beyond 7.5 km, and its use *declines* with landscape canopy cover (`r ring_est(ring_row("Setophaga_striata", striata_radius))` per 10 percentage points at `r ring_km(striata_radius)`), consistent with Morales-Rozo et al. (2025). For *S. ruticilla*, no radius up to 10 km changed WAIC by more than `r sprintf("%.0f", max(abs(filter(ring, Species == "Setophaga_ruticilla", Chains == "short", Radius_m <= 10000)$dWAIC)))`; only the 20 km ring improved it (ΔWAIC `r ring_dw("Setophaga_ruticilla", 20000)`, canopy `r ring_est(ring_row("Setophaga_ruticilla", 20000))`), a nearly between-farm gradient that I do not trust as a scale of effect. *P. rubra*'s profile is flat within run-to-run noise (ΔWAIC `r sprintf("%.1f", min(filter(ring, Species == "Piranga_rubra", Chains == "short")$dWAIC))` at best), with positive but unclear coefficients. Canopy cover is therefore left out of the *S. ruticilla* and *P. rubra* models. In *S. striata*'s base model (full-length chains), the `r ring_km(striata_radius)` ring gave a canopy coefficient of `r est(striata_canopy)` per 10 percentage points (ΔWAIC `r sprintf("%.1f", striata_dwaic)` against the same model without canopy).
+Among the single-species models, only *S. striata* showed a clear scale of effect (@fig-ring): WAIC fell smoothly from 1 km to a minimum at `r ring_km(ring_best("Setophaga_striata")$Radius_m)` (ΔWAIC `r ring_dw("Setophaga_striata", striata_radius)`) and rose again beyond 7.5 km. In its base model (full-length chains), use declined with canopy cover within `r ring_km(striata_radius)` (`r est(striata_canopy)` per 10 percentage points; ΔWAIC `r sprintf("%.1f", striata_dwaic)` against the same model without canopy), consistent with the negative relationship with forest cover within 1 km found by Morales-Rozo et al. (2025). For *S. ruticilla*, no radius up to 10 km changed WAIC by more than `r sprintf("%.0f", max(abs(filter(ring, Species == "Setophaga_ruticilla", Chains == "short", Radius_m <= 10000)$dWAIC)))`, and only the 20 km ring improved it (ΔWAIC `r ring_dw("Setophaga_ruticilla", 20000)`, canopy `r ring_est(ring_row("Setophaga_ruticilla", 20000))`). This may reflect a true but weak response at broad scales, but the overlap among rings of 20 km or more leaves too little contrast to test such scales in this dataset. *P. rubra*'s profile was flat within run-to-run MCMC noise (ΔWAIC `r sprintf("%.1f", min(filter(ring, Species == "Piranga_rubra", Chains == "short")$dWAIC))` at best), with positive but unclear coefficients.
 
-**Canopy cover and the spatial random effect.** Landscape canopy at a few km varies mostly between farms, so it can compete with the spatial random effect. In the single-species fits the spatial variance is weakly identified (95% CrIs about 0.2 to 4 in every fit), but for *S. striata* adding canopy at `r ring_km(striata_radius)` lowered its posterior median from `r sprintf("%.2f", ring_row("Setophaga_striata", NA)$Spatial_var)` to `r sprintf("%.2f", ring_row("Setophaga_striata", striata_radius)$Spatial_var)` and the SD across locations of the posterior-mean spatial effect from `r sprintf("%.2f", ring_row("Setophaga_striata", NA)$SD_w_sites)` to `r sprintf("%.2f", ring_row("Setophaga_striata", striata_radius)$SD_w_sites)`: canopy explains part of the spatial pattern the random effect carried without it. Both returned to their baseline values at 20 km, where the canopy coefficient was near zero. For *S. ruticilla* and *P. rubra* the spatial effect did not change. In the multi-species model, the shared spatial factor's effective range shortened from `r sprintf("%.1f", ring_row("Community", NA, "full")$Range_km)` km without canopy to `r sprintf("%.1f", ring_row("Community", comm_radius, "full")$Range_km)` km at `r ring_km(comm_radius)` (95% CrIs span most of the prior in both), and *S. ruticilla*'s spatial variance (its loading squared) rose from `r sprintf("%.2f", ring_loading("Setophaga_ruticilla", NA)$Spatial_var)` to `r sprintf("%.2f", ring_loading("Setophaga_ruticilla", comm_radius)$Spatial_var)`: with canopy taking up the broad pattern, the factor describes finer-scale structure that *S. ruticilla* shares. *S. striata*'s loading is fixed at 1 for identifiability, so its spatial variance cannot change in this model. Without the spatial random effect (a location random effect in its place), the `r ring_km(comm_radius)` ring still improved WAIC (ΔWAIC `r sprintf("%.1f", nonsp_dwaic)` against the same model without canopy), and the canopy coefficients barely changed: community-level mean `r est(nonsp_comm)`, *S. striata* `r est(nonsp_sp$Setophaga_striata)`, *C. ustulatus* `r est(nonsp_sp$Catharus_ustulatus)` per 10 percentage points. The canopy effect therefore does not depend on the spatial random effect it partly replaces.
+### Nearctic-Neotropical migrants outside Meta
 
-## Nearctic-Neotropical migrants outside Meta
-
-Extending the models to other regions would add few detections outside forest. Within the same season window, the other ecoregions have `r out_effort[["Ssp"]]` silvopasture and `r out_effort[["Pastizales"]]` pasture visits, against `r out_effort[["Bosque"]]` in forest, and `r out_forest[["forest"]]` of the `r out_forest[["all"]]` visits with a Nearctic-Neotropical migrant outside Meta were in forest (@tbl-outside; survey effort in @tbl-effort). The main gains would be *Setophaga fusca*, an Andean winterer detected mostly in Eje Cafetero forest, and more forest data for *P. rubra* and *C. ustulatus*; *S. striata* was not recorded outside Meta in season.
+Extending the models to other regions would add few detections outside forest. Within the same season window, the other ecoregions have `r out_effort[["Ssp"]]` silvopasture and `r out_effort[["Pastizales"]]` pasture visits, against `r out_effort[["Bosque"]]` in forest, and `r out_forest[["forest"]]` of the `r out_forest[["all"]]` visits with a Nearctic-Neotropical migrant outside Meta were in forest (@tbl-outside; survey effort in @tbl-effort). The main gains would be *Setophaga fusca*, an Andean winterer detected mostly in Eje Cafetero forest; *Setophaga petechia*, detected in both forest and silvopasture; and more forest data for *P. rubra* and *C. ustulatus*.
 
 ## Next steps
 
 - Check the season window against eBird arrival and departure dates in Meta.
-- Test closure: does detection on a visit depend on the days since the previous visit to the same location-period?
+- Test closure: does detection on a visit depend on the days since the previous visit to the same point count?
 - Season-specific rainfall from CHIRPS (Climate Hazards Group InfraRed Precipitation with Station data; free, daily to monthly, about 5 km resolution) to test whether *S. striata* shifts habitat in drier years.
 
-## Supplementary sensitivity checks {#sec-sensitivity}
+```{r}
+#| child: !expr if (show_sensitivity) "_Migrant_report_sensitivity.qmd"
+```
 
-**Season term.** These comparisons use the 15 October season of the single-species models, including the earlier multi-species base model on that season. With period intercepts, a linear day of season varied within periods almost only between October-December 2016 and March 2017, both forest only, so its slope was one forest contrast extended across the whole season; it predicted occupancy rising steadily from October to March, which is not plausible for wintering birds. I therefore replaced it with the arrival-period indicator. Its end, `r arrival_end_date`, follows eBird Status and Trends, which shows *S. striata*'s non-breeding distribution settled in South America by late November to early December; *S. striata* arrives later than most other migrants, so the date is conservative for the community. The indicator is estimated from the 2016-17 forest data (all November 2019 location-periods fall before `r arrival_end_date`, so in 2019 it is absorbed by that period's intercept). In the single-species models, use was lower during arrival for *S. striata* (`r est(arrival_ss$Setophaga_striata)`), less clearly for *S. ruticilla* (`r est(arrival_ss$Setophaga_ruticilla)`), and not for *P. rubra* (`r est(arrival_ss$Piranga_rubra)`). The choice of season term left every habitat contrast unchanged; WAIC with a linear day of season, no season term and the arrival indicator was `r paste(map_chr(names(season_waic), \(k) paste0(if (k == "Community") "multi-species model" else paste0("*", species_label(k), "*"), " ", paste(sprintf("%.1f", season_waic[[k]]), collapse = " / "))), collapse = "; ")` (the multi-species arrival fit with doubled chains). An arrival period ending 1 November, where per-visit detection of any migrant in forest jumped in our data, could not be estimated: *S. striata*, *S. ruticilla* and *Mniotilta varia* were never detected before it, so their arrival coefficients drifted to extreme values (e.g. *S. striata* `r sprintf("%.1f", arrnov_sp[["Setophaga_striata"]])`) and the among-species variance of the arrival coefficient did not converge (Rhat `r sprintf("%.2f", arrnov_rhat)`). The checks below were fit before the arrival indicator and canopy cover were added, so they include a linear day of season and no canopy.
+{{< pagebreak >}}
 
-**Passage period (multi-species model).** Starting the multi-species season on `r comm_season_start_date` adds GAICA's 2019 distance-gradient surveys, which hold most passage detections of *C. virens* and *C. ustulatus* but none of `r paste0("*", species_label(names(passage_detections)[passage_detections == 0]), "*", collapse = ", ")`. In spOccupancy's multi-species models the missing values in the detection data must be the same for every species, so the window cannot differ by species; instead, the early location-periods are flagged as passage. On shorter chains (`r format(n_iter_short, big.mark = ",", scientific = FALSE)` iterations), I compared passage with arrival ending `r arrival_end_date`, passage with arrival ending `r comm_arrival_end_date`, and arrival ending `r arrival_end_date` alone: WAIC `r paste(sprintf("%.1f", sep24_waic), collapse = " / ")`. With arrival ending `r arrival_end_date`, the among-species variance of the passage coefficient did not converge (Rhat `r sprintf("%.2f", passage_rhat[["pass_dec1"]])`), as the species never detected during passage pushed their passage coefficients to extreme values; with arrival ending `r comm_arrival_end_date` it did (Rhat `r sprintf("%.2f", passage_rhat[["pass_nov15"]])`), and WAIC was lowest, so the base model uses that coding with doubled chains. The passage location-periods are exactly the distance-gradient locations, surveyed only by teams 1 and 2, so lower use during passage and lower detection by those teams are separated only by the repeat visits within location-periods.
+## Collaborator questions
 
-**Rainfall.** Annual rainfall enters additively in the base models: it varies only between farms (`r farms_by_habitat[["Ssp"]]` silvopasture farms), and its interaction with habitat reversed sign when annual rainfall was replaced by driest-month rainfall.
-
-**Reference level and prior.** Only `r det_lp_by_habitat$Setophaga_striata[["Pastizales"]]` of `r lp_by_habitat[["Pastizales"]]` pasture location-periods had an *S. striata* detection, so pasture occupancy is weakly identified and partly set by the prior. Refitting *S. striata* with pasture instead of forest as the reference level, which changes only which coefficients the priors act on, gave a silvopasture vs pasture contrast of `r est(striata_pref[, "HabitatSsp"])` instead of `r est(striata_nc_contrasts[["Silvopasture vs pasture"]])` (both without canopy cover); the earlier fit with separate 2016-17 periods and a quadratic in day of season gave `r est(striata_old[, "HabitatSsp"])`, so the reference level, not the period or season terms, moves it. The direction is robust, and silvopasture vs forest barely changed (`r est(striata_pref[, "HabitatSsp"] - striata_pref[, "HabitatBosque"])` with pasture as reference).
-
-Varying the prior directly gives the same picture. With the variance of the normal prior on the coefficients set to `r prior_vars[1]` and `r prior_vars[2]` instead of the default 2.72, *S. striata*'s silvopasture vs pasture contrast was `r est(striata_prior[["1"]][["Silvopasture vs pasture"]])` and `r est(striata_prior[["10"]][["Silvopasture vs pasture"]])` (default `r est(striata_nc_contrasts[["Silvopasture vs pasture"]])`; all three fits without canopy cover), and silvopasture vs forest `r est(striata_prior[["1"]][["Silvopasture vs forest"]])` and `r est(striata_prior[["10"]][["Silvopasture vs forest"]])`. In the multi-species model, with the same variances on the prior for the community-level means, the community-level mean silvopasture vs pasture contrast was `r est(comm_prior[["10"]][["Silvopasture vs pasture"]])` at variance `r prior_vars[2]`; at variance `r prior_vars[1]` the among-species variance of the silvopasture coefficient did not converge (Rhat `r sprintf("%.2f", rhat_ssp_var[["1"]])`), so that fit is not interpreted. The direction of every silvopasture contrast is robust to the prior; the size of silvopasture vs pasture is not.
-
-**Why the first multi-species fit inflated the contrasts.** An earlier fit with pasture as the reference level gave larger contrasts against pasture than the single-species models (e.g. *S. striata* silvopasture vs pasture `r est(sp_draws(ms_old, "HabitatSsp", "Setophaga_striata"))` against `r est(striata_old[, "HabitatSsp"])` single-species). Its silvopasture and forest occupancy matched the single-species fits, but each species' pasture occupancy, then the intercept, was pulled toward a low community intercept set by the six rare species, which were detected almost only in forest. With forest, the best-sampled habitat, as the reference, the contrasts agree (@fig-compare), and pasture occupancy under the prediction conditions is low in both models, with no consistent shift between them (*S. striata* `r occ_med(pasture_occ$Setophaga_striata$ss)` single-species vs `r occ_med(pasture_occ$Setophaga_striata$ms)` multi-species; *S. ruticilla* `r occ_med(pasture_occ$Setophaga_ruticilla$ss)` vs `r occ_med(pasture_occ$Setophaga_ruticilla$ms)`; *P. rubra* `r occ_med(pasture_occ$Piranga_rubra$ss)` vs `r occ_med(pasture_occ$Piranga_rubra$ms)`). The earlier fit also did not converge, because March 2017 surveyed only forest and its period intercept was not identified for species never detected then; merging the two 2016-17 periods fixed this in the base model (without canopy, the largest community-level Rhat left, `r sprintf("%.2f", rhat_comm(ms_fit_nc))`, is for the among-species variance of one team's warm-up slope in detection).
-
-**Silvopasture's own slope with distance from the forest edge.** In the models above, pasture and silvopasture share one slope with distance outside forest. Letting silvopasture differ from pasture, the community-mean difference was `r est(comm_draws(ms_dist, "Ssp_Dist_open"))`, and all three well-detected species had flatter slopes in silvopasture than in pasture, though none clearly (*S. striata* `r est(sp_draws(ms_dist, "Ssp_Dist_open", "Setophaga_striata"))`, *S. ruticilla* `r est(sp_draws(ms_dist, "Ssp_Dist_open", "Setophaga_ruticilla"))`, *P. rubra* `r est(sp_draws(ms_dist, "Ssp_Dist_open", "Piranga_rubra"))`). WAIC did not change (`r sprintf("%.1f", waic[["dist"]])` vs `r sprintf("%.1f", waic[["base"]])`), and the largest community-level Rhat was `r sprintf("%.2f", rhat_comm(ms_dist))`, for the among-species variance of the 2016-17 period intercept rather than the slope terms.
-
-**Live fences vs dispersed trees.** Splitting silvopasture into live fences (`r sum(ss_l$occ.covs$Habitat_split == "Live_fence")` locations within the season window) and dispersed trees (`r sum(ss_l$occ.covs$Habitat_split == "Dispersed_trees")`) asks more than the migrant data can answer: the among-species variance of the dispersed-trees effect did not converge (Rhat `r sprintf("%.2f", ms_split$rhat$tau.sq.beta[colnames(ms_split$tau.sq.beta.samples) == "Habitat_splitDispersed_trees"])`), and WAIC did not change (`r sprintf("%.1f", waic[["split"]])`). *S. striata* tended to use dispersed trees more than live fences (live fence minus dispersed trees `r est(lf_minus_dt(ms_split, "Setophaga_striata"))`), which fits its higher use with more silvopasture cover nearby, since dispersed-tree points have more silvopasture cover within 300 m than live-fence points (mean `r ssp_by_sub[["Dispersed_trees"]]`% vs `r ssp_by_sub[["Live_fence"]]`% over surveyed location-periods). The split is better tested in the 98-species model.
+**Occupancy or use?** Wintering migrants may move among points between visits. If they do, closure is violated: occupancy then estimates the probability that a location was *used* during the survey period, and detection estimates availability times detectability (Rota et al. 2009). The first and last visits to a point count were a median of `r median(comm_lp_span)` days apart (maximum `r max(comm_lp_span)` days), which limits movement between visits, so closure may hold well enough to read the estimates as occupancy. I currently call them occupancy (use); should we instead treat them as occupancy proper, or keep the more cautious reading?
 
 ## Supplementary figures and tables
 
 ```{r}
-#| label: fig-rain-ss
-#| fig-cap: !expr rain_cap
-#| fig-height: 3.6
-ss_plot(rain_tbl, rain_points, "Annual rainfall (mm)")
-```
-
-```{r}
-#| label: fig-dist
-#| fig-cap: !expr dist_cap
-#| fig-height: 3.6
-ss_plot(dist_tbl, dist_points, "Distance to forest edge (m; negative = inside forest)", edge = TRUE)
+#| label: fig-habitat
+#| fig-cap: !expr habitat_cap
+#| fig-height: 3.2
+ggplot(occ_by_habitat, aes(Habitat, med, color = Habitat)) +
+  geom_pointrange(aes(ymin = lcl, ymax = ucl)) +
+  facet_wrap(~ Species, nrow = 1) +
+  scale_color_manual(values = hab_colors, guide = "none") +
+  labs(x = NULL, y = "Occupancy (use) probability") +
+  theme_bw() + theme(strip.text = element_text(face = "italic"), axis.text.x = element_text(angle = 30, hjust = 1))
 ```
 
 ```{r}
 #| label: fig-ssp
 #| fig-cap: !expr ssp_cap
 #| fig-height: 3.6
-ss_plot(ssp_tbl, ssp_points, "Silvopasture cover within 300 m (%)")
+ss_plot(ssp_tbl, lp_ss, "ssp", "Silvopasture cover within 300 m (%)")
 ```
 
 ```{r}
 #| label: tbl-outside
 #| tbl-cap: !expr outside_cap
-# PDF: alternate row shading, and widths that keep each species name and the habitat header on one line; Word: plain table
-latex <- knitr::is_latex_output()
-outside_cols <- c("Species", "Meta", if (latex) kableExtra::linebreak("Outside Meta by habitat\n(forest / silvopasture / pasture)", align = "c") else "Outside Meta by habitat (forest / silvopasture / pasture)", "Ecoregions outside Meta (visits)")
-# Species names with their marks, in LaTeX or markdown
+# Widths keep each species name and the habitat header on one line
+dag_mark <- if (latex) "\\textsuperscript{\\dag}" else "^†^"
 outside_show <- outside_tbl %>%
-  mutate(Species = if (latex) paste0("\\textit{", Species_ayerbe, "}", if_else(Mixed, "\\textsuperscript{\\dag}", ""), if_else(Modelled, "*", "")) else paste0("*", Species_ayerbe, "*", if_else(Mixed, "^†^", ""), if_else(Modelled, "\\*", ""))) %>%
+  mutate(Species = italic_species(Species_ayerbe, paste0(if_else(Mixed, dag_mark, ""), if_else(Modelled, star_mark, "")))) %>%
   select(Species, Meta, Habitats, Ecoregions)
-if (latex) {
-  kable(outside_show, format = "latex", booktabs = TRUE, escape = FALSE, linesep = "", align = "lccl", col.names = outside_cols) %>%
-    kableExtra::kable_styling(latex_options = "striped", font_size = 9) %>%
-    kableExtra::column_spec(1, width = "3.5cm") %>%
-    kableExtra::column_spec(3, width = "4.4cm") %>%
-    kableExtra::column_spec(4, width = "5.8cm")
-} else kable(outside_show, col.names = outside_cols)
+report_table(outside_show, c("Species", "Meta", "Outside Meta by habitat\n(pasture / silvopasture / forest)", "Ecoregions outside Meta (visits)"), align = "lccl", widths = c("3.5cm", NA, "4.4cm", "5.8cm"))
 ```
 
 ```{r}
 #| label: tbl-effort
 #| tbl-cap: !expr effort_cap
-kable(effort_tbl)
+report_table(effort_tbl, align = "lccc")
 ```
