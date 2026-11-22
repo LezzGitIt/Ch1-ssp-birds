@@ -54,7 +54,7 @@ dag_complex <- dagify(
   lc_50m ~ Time + Sampling + Farmer_values, 
   Ssp_matrix ~ Climate + Farmer_values + Unknown,
   #Tree_characteristics ~ Time,
-  Landscape_forest ~ Farmer_values + Sampling,
+  Landscape_forest ~ Farmer_values + Sampling + Climate,
   Dist_forest ~ lc_50m,
   Unknown ~ Spatial_auto,
   exposure = c("lc_50m"), #, "Ssp_matrix"
@@ -65,15 +65,19 @@ dag_complex <- dagify(
 adjustmentSets(dag_complex, type = "minimal") # all
 
 # Plot
-tidy_dagitty(dag_complex, layout = "fr") %>% 
+set.seed(123)
+dag_complex_plot <- tidy_dagitty(dag_complex, layout = "fr") %>%
   ggdag_status(text_col = "black",
-               text = TRUE, 
+               text = TRUE,
                edge_type = "link_arc",
                node_size = 20,
-               text_size = 3, 
-               stylized = TRUE) + 
-  theme_dag() + 
+               text_size = 3,
+               stylized = TRUE) +
+  theme_dag() +
   guides(fill = "none", color = "none")
+dir.create("Figures/DAGs", showWarnings = FALSE)
+ggsave("Figures/DAGs/dag_complex.png", dag_complex_plot, width = 8, height = 6, bg = "white")
+print(dag_complex_plot)
 
 
 # >No Ssp_matrix ----------------------------------------------------------
