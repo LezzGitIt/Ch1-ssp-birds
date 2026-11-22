@@ -25,8 +25,14 @@ plot_specs <- tribble(
   "temporal_prec_hinge_f2",  "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_hinge_f2_inits_2026-11-08.rds",  "Tot_prec",  "Habitat",
   "temporal_year_hinge_f2",  "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_year_hinge_f2_inits_2026-11-08.rds",  "Year1",     "Habitat",
   "temporal_hab_ssp_f2",     "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_hab_ssp_f2_inits_2026-11-09.rds",     "ssp",       "Habitat",
-  "temporal_split_hinge_f2", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_split_hinge_f2_inits_2026-11-15.rds", NA,          "Habitat_split"
+  "temporal_split_hinge_f2", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_split_hinge_f2_inits_2026-11-15.rds", NA,          "Habitat_split",
+  # Habitat by landscape canopy cover within 1.5 km, with (primary) and without the cover-by-height adjustment (scale-of-effect analysis, 2026-11-21); habitat and rainfall additive, woody canopy height at its mean
+  "soe_ctx1500",             "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_ctx1500_2026-11-21.rds", "Cover_h1500", "Habitat",
+  "soe_ctx1500_noht",        "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_ctx1500_noht_2026-11-21.rds", "Cover_h1500", "Habitat"
 )
+# Ring cover, woody canopy height and mean survey date per surveyed row (written by the scale-of-effect script), for the scale-of-effect fits, and the radius their terms use
+Fit_covs_path <- "Derived/Excels/Scale_of_effect_fit_covs.csv"
+Fit_covs_radius_m <- 1500
 # Distance interaction model (hinge-coded, with a silvopasture-specific slope outside forest)
 Dist_mod_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_dist_hinge_f2_inits_2026-11-08.rds"
 Dist_model_tag <- "temporal_dist_hinge_f2_inits"
@@ -53,14 +59,14 @@ level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Live_fence = "Li
 level_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", `Live fence` = "#a294f0", `Dispersed trees` = "#3d2a9e", Forest = "#008300")
 axis_labels <- c(
   Dist_forest = "Distance to forest edge (m; negative = inside forest)", Tot_prec = "Annual precipitation (mm)",
-  Year1 = "Year", Survey_date = "Year", ssp = "Silvopasture within 300 m (%)", Canopy_cover = "Forest cover within 1 km (%)",
+  Year1 = "Year", Survey_date = "Year", Year_cont = "Year", ssp = "Silvopasture within 300 m (%)", Canopy_cover = "Forest cover within 1 km (%)", Cover_h1500 = "Canopy cover within 1.5 km (%)",
   Habitat = "Habitat", Pc_start = "Start time (hours after midnight)", Prob_breed = "Breeding probability"
 )
 # Applied after back-transforming: offsets are added (Year1, in fits built before 2026-11-09, is stored as the two-digit first year of the year group; Survey_date is already in decimal years), divisors convert units (Pc_start is in seconds)
 axis_offsets <- c(Year1 = 2000)
 axis_divisors <- c(Pc_start = 3600)
 # Axes labelled in whole years every 2 (time would otherwise get ticks such as 2012.5)
-integer_axes <- c("Year1", "Survey_date")
+integer_axes <- c("Year1", "Survey_date", "Year_cont")
 
 # Functions ---------------------------------------------------------------
 # Fallback for a missing (NA) lookup value
@@ -232,6 +238,16 @@ if (response == "occupancy") {
     pull(forest)
   stopifnot(!anyNA(Forest_raw))
   covs$Forest_300 <- (Forest_raw - mean(Forest_raw)) / sd(Forest_raw)
+  # Scale-of-effect terms (ring cover and woody canopy height at Fit_covs_radius_m, mean survey date), scaled over the surveyed location-periods as in those fits, with their means and SDs added to the scaling table so the axis is back-transformed
+  Fit_raw <- tibble(Id_survey = as.character(covs$Id_survey), Year_grp = as.character(covs$Year_grp), Season = as.character(covs$Season)) %>%
+    left_join(read_csv(Fit_covs_path, col_types = cols(Id_survey = "c", Year_grp = "c", Season = "c")) %>% filter(Radius_m == Fit_covs_radius_m), by = c("Id_survey", "Year_grp", "Season"), relationship = "one-to-one") %>%
+    select(Cover_pct, Height_m, Survey_date) %>%
+    set_names(c(paste0(c("Cover_h", "Height_h"), Fit_covs_radius_m), "Survey_date"))
+  stopifnot(!anyNA(Fit_raw))
+  # Mean survey date is Survey_date in the earlier scale-of-effect fits and Year_cont (the long-term time trend) in later ones
+  Fit_raw$Year_cont <- Fit_raw$Survey_date
+  covs[names(Fit_raw)] <- map(Fit_raw, \(x) (x - mean(x)) / sd(x))
+  scaling <- bind_rows(scaling, tibble(Process = "occupancy", Covariate = names(Fit_raw), Mean = map_dbl(Fit_raw, mean), SD = map_dbl(Fit_raw, sd)))
 }
 
 # Plot --------------------------------------------------------------------
