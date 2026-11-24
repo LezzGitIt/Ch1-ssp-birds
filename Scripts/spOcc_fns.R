@@ -211,15 +211,25 @@ hinge_distance <- function(dist_m, is_forest, dist_sd) {
   list(Dist_open = ifelse(is_forest, 0, pmax(dist_m, 0)) / dist_sd, Dist_inside = ifelse(is_forest, pmax(-dist_m, 0), 0) / dist_sd)
 }
 
-# Habitat with silvopasture split into its two types, live fence and dispersed trees: habitat holds the Habitat labels (Pastizales / Ssp / Bosque) and id_survey the survey ID of each element (same length, e.g. the rows of a stacked data list); returns a factor with levels Pastizales, Live_fence, Dispersed_trees, Bosque
-# Each silvopasture point's type (Habitat_sub) comes from the wrangling repo's site table, keyed by location code, which the landscape-metrics table maps from survey IDs
-split_habitat <- function(habitat, id_survey, lsm_path, site_covs_path) {
+# Habitat subtype (Habitat_sub, e.g. the silvopasture type or the forest type) of each survey ID, from the wrangling repo's site table, keyed by location code, which the landscape-metrics table maps from survey IDs
+habitat_subtype <- function(id_survey, lsm_path, site_covs_path) {
   location_codes <- dplyr::distinct(readr::read_csv(lsm_path, show_col_types = FALSE), Id_survey = as.character(Id_survey), Id_survey_no_dc)
   types <- dplyr::distinct(readr::read_csv(site_covs_path, show_col_types = FALSE), Id_survey_no_dc, Habitat_sub)
-  habitat_sub <- dplyr::tibble(Id_survey = as.character(id_survey)) |>
+  dplyr::tibble(Id_survey = as.character(id_survey)) |>
     dplyr::left_join(location_codes, by = "Id_survey", relationship = "many-to-one") |>
     dplyr::left_join(types, by = "Id_survey_no_dc", relationship = "many-to-one") |>
     dplyr::pull(Habitat_sub)
+}
+
+# Riparian forest indicator: 1 at forest points whose site-table forest type is riparian ('Ripario'), 0 elsewhere; habitat and id_survey as in split_ssp()
+riparian_forest <- function(habitat, id_survey, lsm_path, site_covs_path) {
+  as.numeric(habitat == "Bosque" & habitat_subtype(id_survey, lsm_path, site_covs_path) %in% "Ripario")
+}
+
+# Habitat with silvopasture split into its two types, live fence and dispersed trees: habitat holds the Habitat labels (Pastizales / Ssp / Bosque) and id_survey the survey ID of each element (same length, e.g. the rows of a stacked data list); returns a factor with levels Pastizales, Live_fence, Dispersed_trees, Bosque
+# Each silvopasture point's type (Habitat_sub) comes from the wrangling repo's site table, keyed by location code, which the landscape-metrics table maps from survey IDs
+split_ssp <- function(habitat, id_survey, lsm_path, site_covs_path) {
+  habitat_sub <- habitat_subtype(id_survey, lsm_path, site_covs_path)
   out <- factor(dplyr::case_when(habitat != "Ssp" ~ as.character(habitat), habitat_sub == "Cerca viva" ~ "Live_fence", habitat_sub == "Arboles dispersos" ~ "Dispersed_trees"), levels = c("Pastizales", "Live_fence", "Dispersed_trees", "Bosque"))
   stopifnot(!anyNA(out))
   out

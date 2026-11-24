@@ -28,7 +28,14 @@ plot_specs <- tribble(
   "temporal_split_hinge_f2", "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_split_hinge_f2_inits_2026-11-15.rds", NA,          "Habitat_split",
   # Habitat by landscape canopy cover within 1.5 km, with (primary) and without the cover-by-height adjustment (scale-of-effect analysis, 2026-11-21); habitat and rainfall additive, woody canopy height at its mean
   "soe_ctx1500",             "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_ctx1500_2026-11-21.rds", "Cover_h1500", "Habitat",
-  "soe_ctx1500_noht",        "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_ctx1500_noht_2026-11-21.rds", "Cover_h1500", "Habitat"
+  "soe_ctx1500_noht",        "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_ctx1500_noht_2026-11-21.rds", "Cover_h1500", "Habitat",
+  # Combined habitat-conversion model at 1.5 km (habitat by landscape canopy cover, by silvopasture cover within 300 m and by rainfall in one fit, with the cover-by-height adjustment; 2026-11-22), one figure per interaction
+  "soe_full1500",            "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_2026-11-21.rds", "Cover_h1500", "Habitat",
+  "soe_full1500",            "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_2026-11-21.rds", "ssp",         "Habitat",
+  "soe_full1500",            "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_2026-11-21.rds", "Tot_prec",    "Habitat",
+  # Habitat contrasts of the habitat-conversion model with forest cover within 300 m, without and with the riparian-forest indicator (2026-11-22); forest is non-riparian forest in the latter (fixed_vals)
+  "soe_full1500_f300",       "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_f300_2026-11-22.rds", NA,     "Habitat",
+  "soe_full1500_f300_rip",   "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_f300_rip_2026-11-22.rds", NA, "Habitat"
 )
 # Ring cover, woody canopy height and mean survey date per surveyed row (written by the scale-of-effect script), for the scale-of-effect fits, and the radius their terms use
 Fit_covs_path <- "Derived/Excels/Scale_of_effect_fit_covs.csv"
@@ -50,8 +57,8 @@ show_caption <- FALSE
 pred_n <- 200
 ci_level <- 0.95
 # Optional override of the default value of any non-focal covariate, on the model's (scaled) scale, e.g. list(Year1 = 0, Habitat = "Ssp")
-# Hinge-coded fits: distance terms at the forest edge, where the habitat contrasts are defined; forest cover within 300 m at its mean
-fixed_vals <- list(Dist_open = 0, Dist_inside = 0, Forest_300 = 0)
+# Hinge-coded fits: distance terms at the forest edge, where the habitat contrasts are defined; forest cover within 300 m at its mean; the riparian indicator at 0 (non-riparian forest), as pasture and silvopasture points are never riparian
+fixed_vals <- list(Dist_open = 0, Dist_inside = 0, Forest_300 = 0, Riparian = 0)
 
 # Display names and colours (same palette as the NMDS figure)
 level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Live_fence = "Live fence", Dispersed_trees = "Dispersed trees", Bosque = "Forest", N = "Not in forest", Y = "In forest")
@@ -231,13 +238,15 @@ covs <- map(covs, \(x) if (is.data.frame(x) || is.matrix(x)) unlist(as.data.fram
 if (response == "occupancy") {
   Dist_scaling <- filter(scaling, Process == "occupancy", Covariate == "Dist_forest")
   covs[c("Dist_open", "Dist_inside")] <- hinge_distance(covs$Dist_forest * Dist_scaling$SD + Dist_scaling$Mean, covs$Habitat == "Bosque", Dist_scaling$SD)
-  covs$Habitat_split <- split_habitat(covs$Habitat, covs$Id_survey, Lsm_path, Site_covs_path)
+  covs$Habitat_split <- split_ssp(covs$Habitat, covs$Id_survey, Lsm_path, Site_covs_path)
   # Forest cover within 300 m, scaled over the surveyed location-periods as in the fits
   Forest_raw <- tibble(Id_survey = as.character(covs$Id_survey), Year_grp = covs$Year_grp) %>%
     left_join(distinct(read_csv(Lsm_path, show_col_types = FALSE), Id_survey, Year_grp, forest), by = c("Id_survey", "Year_grp"), relationship = "many-to-one") %>%
     pull(forest)
   stopifnot(!anyNA(Forest_raw))
   covs$Forest_300 <- (Forest_raw - mean(Forest_raw)) / sd(Forest_raw)
+  # Riparian forest indicator (1 at riparian forest points, 0 elsewhere), as in the habitat-conversion fits
+  covs$Riparian <- riparian_forest(covs$Habitat, covs$Id_survey, Lsm_path, Site_covs_path)
   # Scale-of-effect terms (ring cover and woody canopy height at Fit_covs_radius_m, mean survey date), scaled over the surveyed location-periods as in those fits, with their means and SDs added to the scaling table so the axis is back-transformed
   Fit_raw <- tibble(Id_survey = as.character(covs$Id_survey), Year_grp = as.character(covs$Year_grp), Season = as.character(covs$Season)) %>%
     left_join(read_csv(Fit_covs_path, col_types = cols(Id_survey = "c", Year_grp = "c", Season = "c")) %>% filter(Radius_m == Fit_covs_radius_m), by = c("Id_survey", "Year_grp", "Season"), relationship = "one-to-one") %>%

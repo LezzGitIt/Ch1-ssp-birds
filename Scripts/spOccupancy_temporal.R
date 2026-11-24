@@ -152,7 +152,7 @@ stopifnot(!anyNA(Forest_raw))
 oc$Forest_300 <- to_site_period((Forest_raw - mean(Forest_raw)) / sd(Forest_raw))
 
 ## Silvopasture split into live fence and dispersed trees, one value per location
-Split_rows <- split_habitat(Stacked_oc$Habitat, Stacked_oc$Id_survey, Lsm_path, Site_covs_path)
+Split_rows <- split_ssp(Stacked_oc$Habitat, Stacked_oc$Id_survey, Lsm_path, Site_covs_path)
 stopifnot(all(tapply(Split_rows, Stacked_oc[[Site_col]], n_distinct) == 1))
 oc$Habitat_split <- Split_rows[match(Site_levels, Stacked_oc[[Site_col]])]
 stopifnot(identical(oc$Habitat_split %in% c("Live_fence", "Dispersed_trees"), as.character(oc$Habitat) == "Ssp"))
