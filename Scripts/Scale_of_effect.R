@@ -100,7 +100,7 @@ if (file.exists(Rings_csv)) {
         terra::rast(clip_path)
       } else {
         message("No Farm_diversity clip for farm ", grp$Id_scr[1], " / ", grp$Raster_year[1], "; cropping the national raster")
-        terra::crop(terra::rast(file.path(National_dir, sprintf("Colombia_WVCC_%d.tif", grp$Raster_year[1]))), terra::buffer(pts, max(Radii_m) + 500), snap = "out")
+        terra::crop(terra::rast(file.path(National_dir, sprintf("WVCC/Colombia_WVCC_%d_50km.tif", grp$Raster_year[1]))), terra::buffer(pts, max(Radii_m) + 500), snap = "out")
       }
       # The widest disc must lie inside the raster
       need <- as.vector(terra::ext(terra::buffer(pts, max(Radii_m))))
@@ -125,7 +125,7 @@ if (!file.exists(Rings_wide_csv)) {
     group_split(Raster_year) %>%
     map(\(grp) {
       pts <- terra::vect(grp, geom = c("Long", "Lat"), crs = "EPSG:4326")
-      canopy_r <- terra::crop(terra::rast(file.path(National_dir, sprintf("Colombia_WVCC_%d.tif", grp$Raster_year[1]))), terra::buffer(pts, max(Wide_radii_m) + 500), snap = "out")
+      canopy_r <- terra::crop(terra::rast(file.path(National_dir, sprintf("WVCC/Colombia_WVCC_%d_50km.tif", grp$Raster_year[1]))), terra::buffer(pts, max(Wide_radii_m) + 500), snap = "out")
       map(c(Ring_inner_m, Wide_radii_m), \(radius) {
         exactextractr::exact_extract(canopy_r, sf::st_as_sf(terra::buffer(pts, width = radius)), c("sum", "count"), progress = FALSE) %>%
           mutate(Id_survey_no_dc = grp$Id_survey_no_dc, Raster_year = grp$Raster_year, Radius_m = radius)

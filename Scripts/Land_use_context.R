@@ -143,8 +143,8 @@ hansen_forest <- tibble(Year = c(2000, 2012:2024)) %>%
 
 # Woody canopy forest area by survey year ----
 woody_forest <- map(Raster_years, \(year) {
-  cover <- read_in_area(file.path(National_dir, sprintf("WVCC/Colombia_WVCC_%d.tif", year)), buffer_union)
-  height <- read_in_area(file.path(National_dir, sprintf("WVCH/Colombia_WVCH_%d.tif", year)), buffer_union)
+  cover <- read_in_area(file.path(National_dir, sprintf("WVCC/Colombia_WVCC_%d_50km.tif", year)), buffer_union)
+  height <- read_in_area(file.path(National_dir, sprintf("WVCH/Colombia_WVCH_%d_50km.tif", year)), buffer_union)
   cell_ha <- terra::cellSize(cover, unit = "ha", mask = TRUE)
   forest <- cover >= Forest_cover_pct & height >= Forest_height_m * 10
   tibble(
