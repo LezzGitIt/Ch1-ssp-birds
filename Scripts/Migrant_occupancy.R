@@ -2,7 +2,7 @@
 # Occupancy of Nearctic-Neotropical migrants in Meta during the wintering season: single-species multi-season occupancy models for a focal migrant (Setophaga striata by default), with the primary model's occupancy structure (hinge distance, mean survey date) (the report's base models replace day of season with an arrival-period indicator, 2026-11-16), and the primary detection structure without Prob_breed (a resident breeding-phenology covariate)
 # Model family: Bernoulli occupancy and detection with logit links (stPGOcc: spatial intercept, NNGP exponential, 5 neighbours, effective-range prior set per fit variant (free, small, mid-range or extent-wide), no AR(1)), the single-species counterpart of the primary svcTMsPGOcc fit; seed 20261107
 # Visits outside the wintering season (before 15 October or after March; first Meta detection 8 October 2019, none in 439 visits from 23 September to 6 October 2019; no April surveys in Meta) are set to NA in y and the detection covariates, so occupancy means use of the location during the non-breeding season; the report's single-species fits use species-specific windows (swin flag) and its habitat-by-rainfall fits drop pasture (nopast flag), see Configuration
-# Collector team enters detection as fixed effects (dummies), not a random effect: only 4 teams remain in season, too few to estimate a variance, and detection is identified from the repeat visits within each location-period even where a team covers a whole period
+# Collector team enters detection as fixed effects (dummies), not a random effect: only 4 teams remain in season, too few to estimate a variance, and detection is identified from the repeat visits within each location-period even where a team covers a whole period; the sep24 season has 6 teams, and one community variant (teamre) puts team in as a random intercept instead
 # Survey_date is a control, not an estimable trend: 2016-17 surveyed almost only forest, and silvopasture and pasture have only November 2019 and January-February 2026, which also differ in time of season
 # Also fits a multi-species model of the migrants (svcTMsPGOcc, 1 factor, same data and season window; tMsPGOcc with a location random effect in the non-spatial variants) on the Nearctic-Neotropical migrants with at least 2 in-season detections, taken from the 278-species list (same locations, periods and covariates as the 98-species list)
 # Scale of effect of landscape canopy cover: one fit per ring radius (ring cover from Scale_of_effect.R), compared by WAIC against the fit without a ring (ring_compare section)
@@ -106,7 +106,9 @@ Det_formulas <- list(
   team = ~ Forest_bin + Pc_start + I(Pc_start^2) + Sampling_day_log + Team_4 + Team_7 + Team_8,
   team_day = ~ Forest_bin + Pc_start + I(Pc_start^2) + Sampling_day_log * (Team_4 + Team_7 + Team_8),
   ## The sep24 season adds GAICA's 2019 distance-gradient teams (1 and 2), which the 15 October season does not reach
-  team_day_sep24 = ~ Forest_bin + Pc_start + I(Pc_start^2) + Sampling_day_log * (Team_1 + Team_2 + Team_4 + Team_7 + Team_8)
+  team_day_sep24 = ~ Forest_bin + Pc_start + I(Pc_start^2) + Sampling_day_log * (Team_1 + Team_2 + Team_4 + Team_7 + Team_8),
+  ## Team as a random intercept in place of the team dummies (user, 2026-11-23), keeping the team-specific warm-up slopes as fixed effects: spOccupancy 0.8.2 fits random intercepts only (its formula parser keeps the grouping index of a (x | g) term, not x)
+  team_re_sep24 = ~ Forest_bin + Pc_start + I(Pc_start^2) + Sampling_day_log + Sampling_day_log:(Team_1 + Team_2 + Team_4 + Team_7 + Team_8) + (1 | Team_id)
 )
 ## Periods surveyed in all three habitats, for the shared-periods variant (drops the forest-only 2016-17 surveys)
 Shared_periods <- c("19.Early", "25-26.Early")
@@ -175,6 +177,8 @@ Fit_variants <- c(
   list(ms_fref_r3000_rain_arrnov15_pass_free_long = make_variant("fref_r3000_rain_arrnov15_pass", "free", "team_day_sep24", multi = TRUE, tau_ig = Tau_ig_migrants, long = TRUE)),
   ## Multi-species habitat-by-cover fits on the community base model, doubled chains (2026-11-19, run with sep24 nopast)
   list(ms_fref_r3000_ssp_arrnov15_pass_free_long = make_variant("fref_r3000_ssp_arrnov15_pass", "free", "team_day_sep24", multi = TRUE, tau_ig = Tau_ig_migrants, long = TRUE), ms_fref_r3000_canopy_arrnov15_pass_free_long = make_variant("fref_r3000_canopy_arrnov15_pass", "free", "team_day_sep24", multi = TRUE, tau_ig = Tau_ig_migrants, long = TRUE)),
+  ## Community base model with a collector-team random intercept in detection (2026-11-23, run with sep24): the among-species variances of teams 1 and 2's warm-up slopes are the recurring orange Rhats of the sep24 fits
+  list(ms_fref_r3000_arrnov15_pass_teamre_free_long = make_variant("fref_r3000_arrnov15_pass", "free", "team_re_sep24", multi = TRUE, tau_ig = Tau_ig_migrants, long = TRUE)),
   ## Community at the chosen 3 km radius without the spatial random effect, and its no-ring baseline (2026-11-16, user: location random effect instead), full-length chains
   list(ms_fref_nonsp = make_variant("fref", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, spatial = FALSE), ms_fref_r3000_nonsp = make_variant("fref_r3000", "free", "team_day", multi = TRUE, tau_ig = Tau_ig_migrants, spatial = FALSE))
 )
@@ -276,6 +280,8 @@ det_covs <- map(tmsOcc_l$det.covs[setdiff(names(tmsOcc_l$det.covs), c("Prob_bree
 Teams <- sort(unique(Team[In_season]))
 cat("Teams in season:", paste(Teams, collapse = ", "), "| reference:", Team_ref, "\n")
 det_covs <- c(det_covs, set_names(map(setdiff(Teams, Team_ref), \(k) ifelse(In_season, as.numeric(Team == k), NA)), paste0("Team_", setdiff(Teams, Team_ref))))
+## Team index (1 to the number of in-season teams) for the team random effect
+det_covs$Team_id <- ifelse(In_season, match(Team, Teams), NA)
 
 ## Day of season: location-period mean over in-season visits, scaled over the surveyed location-periods; unsurveyed cells get the period mean (or 0 when a period has no in-season visits), which only affects predictions there
 Day_raw <- ifelse(Julian >= Season_start, Julian - Season_start, Julian + 365 - Season_start)
