@@ -1,8 +1,10 @@
 ## PhD birds in silvopastoral landscapes ##
-# NMDS of bird community composition by Habitat (Pastizales/Ssp/Bosque) in Meta, built from posterior draws of the fitted occupancy model's latent occupancy state (z.samples) rather than raw detections. A reference ordination is fit on the across-draw mean *dissimilarity matrix* (each draw's own Bray-Curtis distance matrix, averaged element-wise - not a distance matrix computed from the mean occupancy data, which isn't equivalent since Bray-Curtis is a nonlinear function of the input); each individual posterior draw is ordinated separately and Procrustes-rotated onto that reference, so the K per-habitat ellipses show how much the model's own estimation uncertainty shifts community composition, all on one comparable set of axes.
+# NMDS of bird community composition by Habitat (Pastizales/Ssp/Bosque) in Meta, built from posterior draws of the fitted occupancy model's latent occupancy state (z.samples; or the occupancy probabilities, psi.samples, via community_state) rather than raw detections. A reference ordination is fit on the across-draw mean *dissimilarity matrix* (each draw's own Bray-Curtis distance matrix, averaged element-wise - not a distance matrix computed from the mean occupancy data, which isn't equivalent since Bray-Curtis is a nonlinear function of the input); each individual posterior draw is ordinated separately and Procrustes-rotated onto that reference, so the K per-habitat ellipses show how much the model's own estimation uncertainty shifts community composition, all on one comparable set of axes.
 
 # User toggles ------------------------------------------------------------
 K <- 50       # number of posterior draws to ordinate
+# Community state ordinated: "z" = the latent occupancy states (presence/absence per draw, imputing undetected presences), "psi" = the occupancy probabilities (smooth, so they can be compared with the habitat-conversion scenario ordination, which needs psi because z cannot respond to a counterfactual); "psi" adds '_psi' to every cache, table and figure name
+community_state <- "z"
 nmds_k <- 3   # number of NMDS dimensions
 seed <- 123   # for reproducible draw selection & metaMDS random starts
 try_n <- 10   # metaMDS random starts (increase for a more stable final solution)
@@ -66,24 +68,25 @@ library(magick)
 # Fitted model and the data list it was fitted to (stacked msOcc_l_* or multi-season tmsOcc_l_*); model_tag names the cache, so a different model never reads another model's ordinations
 Occ_mod_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_split_hinge_f2_inits_2026-11-15.rds"
 data_l_path <- "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_98_hab_fix.rds"
-model_tag <- "temporal_split_hinge_f2_inits_98"
+model_tag <- paste0("temporal_split_hinge_f2_inits_98", if (community_state == "psi") "_psi")
 Occ_mod <- readRDS(Occ_mod_path)
+state_samples <- Occ_mod[[paste0(community_state, ".samples")]]
 data_l <- readRDS(data_l_path)
 
 # Build per-draw community matrices ------------------------------------------
 # K draws evenly spaced across the posterior, rather than random, for even coverage
-draw_idx <- round(seq(1, dim(Occ_mod$z.samples)[1], length.out = K))
+draw_idx <- round(seq(1, dim(state_samples)[1], length.out = K))
 # One community (row) per surveyed location x period, as in the stacked fits; a multi-season fit's z is draws x species x location x period and also holds draws for unsurveyed periods (no data there), which are dropped
-if (length(dim(Occ_mod$z.samples)) == 4) {
+if (length(dim(state_samples)) == 4) {
   n_loc <- dim(data_l$y)[2]
   surveyed <- which(apply(!is.na(data_l$y[1, , , , drop = FALSE]), c(2, 3), any), arr.ind = TRUE)
   site_meta <- tibble(Id_survey = dimnames(data_l$y)[[2]][surveyed[, 1]], Period = dimnames(data_l$y)[[3]][surveyed[, 2]], Habitat = data_l$occ.covs$Habitat[surveyed[, 1]])
-  z_draws <- Occ_mod$z.samples[draw_idx, , , , drop = FALSE]
-  dim(z_draws) <- c(length(draw_idx), dim(z_draws)[2], prod(dim(z_draws)[3:4]))
-  z_draws <- z_draws[, , (surveyed[, 2] - 1) * n_loc + surveyed[, 1], drop = FALSE]
+  state_draws <- state_samples[draw_idx, , , , drop = FALSE]
+  dim(state_draws) <- c(length(draw_idx), dim(state_draws)[2], prod(dim(state_draws)[3:4]))
+  state_draws <- state_draws[, , (surveyed[, 2] - 1) * n_loc + surveyed[, 1], drop = FALSE]
 } else {
   site_meta <- data_l$occ.covs[, c("Id_survey", "Habitat")]
-  z_draws <- Occ_mod$z.samples[draw_idx, , , drop = FALSE]
+  state_draws <- state_samples[draw_idx, , , drop = FALSE]
 }
 # Habitat_split: each location's silvopasture type, read from the fit's habitat dummies (the data list carries only Habitat); multi-season fits only
 if (habitat_var == "Habitat_split") {
@@ -96,16 +99,16 @@ if (habitat_var == "Habitat_split") {
 # This data is already Meta-department-only (Department == "Meta" for every row); just exclude Mosaic
 site_idx <- which(site_meta$Habitat != "Mosaic")
 site_meta <- site_meta[site_idx, ]
-z_draws <- z_draws[, , site_idx, drop = FALSE] # K x species x sites
+state_draws <- state_draws[, , site_idx, drop = FALSE] # K x species x sites
 # Translate to English for the figure - recoded here (not just in the legend labels) so every downstream Habitat-grouped object (ellipses, species_candidates, etc.) already carries the English term, with nothing left keyed to the Spanish original.
 site_meta$Habitat <- recode(site_meta$Habitat, Pastizales = "Pasture", Ssp = "Silvopasture", Live_fence = "Live fence", Dispersed_trees = "Dispersed trees", Bosque = "Forest")
 
 # Every draw's matrix has the same sites x species shape, in the same order, which is what makes the Procrustes alignment below valid. A site with no species in a draw (a valid posterior state, e.g. a pasture survey with no detections) is at Bray-Curtis 1 from every other site, but two empty sites in one draw give an undefined 0/0 distance
-empty_sites <- apply(z_draws, c(1, 3), sum) == 0
+empty_sites <- apply(state_draws, c(1, 3), sum) == 0
 if (any(rowSums(empty_sites) > 1)) stop("A draw has two or more sites with no species present, so their Bray-Curtis distance is undefined")
 if (any(empty_sites)) message(sum(empty_sites), " site x draw combinations have no species present (Bray-Curtis 1 to every other site)")
 draw_comm <- function(i) {
-  mat <- t(z_draws[i, , ])
+  mat <- t(state_draws[i, , ])
   colnames(mat) <- Occ_mod$sp.names
   mat
 }
