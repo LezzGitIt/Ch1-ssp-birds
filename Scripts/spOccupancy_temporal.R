@@ -15,7 +15,7 @@ source("Scripts/spOcc_fns.R")
 
 # Configuration ----
 ## Species set: "98" (species detected on at least 19 visits; every fit to date) or "278" (all species, range-clipped); both share the 459 surveyed location-periods and every covariate, and fit names carry the species count
-Species_set <- "98"
+Species_set <- "278"
 ## Stacked list the temporal list is built from (one row per location x year-group x season), with the scaling of its covariates
 msOcc_l_path <- c(`98` = "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds", `278` = "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_278_hab_fix.rds")[[Species_set]]
 tmsOcc_l_path <- c(`98` = "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_98_hab_fix.rds", `278` = "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_278_hab_fix.rds")[[Species_set]]
@@ -36,8 +36,8 @@ Time_levels <- c("13-14.Early", "13-14.Late", "16-17.Early", "16-17.Late", "19.E
 ## The multi-season models need occupancy covariates in every site x period cell, including periods a location was not surveyed (no detection data there): covariates that describe the period are filled with the period mean, all other time-varying covariates with the location's value from its nearest surveyed period
 Period_covs <- "Survey_date"
 
-## Models to fit (formula names below, or smoke / smoke_<name>): from the command line, or, when the script is sourced in RStudio, from Rstudio_sections (empty by default, so sourcing builds the data only)
-Rstudio_sections <- character(0)
+## Models to fit (formula names below, or smoke / smoke_<name>): from the command line, or, when the script is sourced in RStudio, from Rstudio_sections (empty: sourcing builds the data only)
+Rstudio_sections <- "add_split"
 ## Minutes to wait after building the data and running any smoke tests before the full fits start: staggers two fits launched together (e.g. two factor counts in two RStudio sessions) so their end-of-fit memory peaks do not coincide; 0 = start at once
 Start_delay_min <- 0
 run_sections <- if (interactive()) Rstudio_sections else commandArgs(trailingOnly = TRUE)
@@ -89,16 +89,16 @@ batch.length <- 25
 mcmc_long <- list(n.batch = 2400, n.burn = 30000, n.thin = 75, n.chains = 3)
 ## Shorter chains for screening runs such as choosing the number of factors: 24,000 iterations, 12,000 burn-in, thinned by 30 (still 400 kept per chain), 40% of the full length; row 107 refitted at this length matched it (all community coefficients within 0.08 posterior SD, max community Rhat 1.04), as in the scale-of-effect fits; "short" adds _short to the fit name
 mcmc_short <- list(n.batch = 960, n.burn = 12000, n.thin = 30, n.chains = 3)
-Chain_length <- "full"
+Chain_length <- "short"
 n.neighbors <- 5
 priors <- list(phi.unif = list(3 / 25e3, 3 / 23e3)) # effective spatial range 23-25 km
 ar1 <- FALSE
 ## Spatial factors: 2 for the 98 species (with 3, factor 2 emptied even when started informative; Multi_spp_100 row 110); the 278-species count is to be chosen by comparing fits (user, 2026-11-24)
-N_factors <- 2
+N_factors <- 1
 ## Anchor species: spOccupancy fixes the first N_factors species' loadings (1 on their own factor, 0 on later factors) to identify the factors, so they should be common, well-detected species with contrasting habitat use; they move to the front in this order, the rest keep the data list's order, and species beyond N_factors have no effect. Tyrannus melancholicus and Manacus manacus lead the data list (the wrangling script's Order_meta), so the 2-factor fits keep their anchors; Sturnella magna is the pasture species (detected at 43% of pasture location-periods, 3% of forest), Momotus momota and Mesembrinibis cayennensis forest species, Thraupis episcopus a silvopasture-leaning species (user, 2026-11-24)
 Anchor_species <- c("Tyrannus_melancholicus", "Manacus_manacus", "Sturnella_magna", "Milvago_chimachima", "Crotophaga_ani", "Momotus_momota", "Thraupis_episcopus", "Mesembrinibis_cayennensis")
 ## Loadings starting values: "earlier_fit" starts factors 1-2 at the posterior-mean loadings of the 2-factor signed-distance fit (row 90), where factor 2 was informative, because 2-factor runs started at 0 often collapsed it (Jeff Doser's remedy for loadings that won't converge), species that fit lacked and factors beyond 2 at 0; "zero" is spOccupancy's default (all free loadings at 0); spOccupancy uses the same loadings start in every chain
-Lambda_start <- "earlier_fit"
+Lambda_start <- "zero"
 Lambda_source_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_nofarm_long_f2_2026-11-05.rds"
 Lambda_inits_path <- "Derived/Rdata/Model_output/Temporal/lambda_inits_prec_nofarm_long_f2.rds"
 ## Settings passed to fit_temporal() (spOcc_fns.R); every fit is seeded so a rerun reproduces its draws exactly
