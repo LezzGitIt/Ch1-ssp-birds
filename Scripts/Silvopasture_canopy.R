@@ -1,5 +1,5 @@
 ## PhD birds in silvopastoral landscapes ##
-# Canopy-weighted silvopasture cover within 300 m of each point count, and the number of digitized isolated trees within 300 m, from the digitized Meta land-cover polygons; the area-based silvopasture cover (ssp) counts a sparse dispersed-tree stand like a dense one, which overstates dispersed-tree canopy about threefold.
+# Canopy-weighted silvopasture cover within 300 m (and within the 50 m disc) of each point count, and the number of digitized isolated trees within 300 m, from the digitized Meta land-cover polygons; the area-based silvopasture cover (ssp) counts a sparse dispersed-tree stand like a dense one, which overstates dispersed-tree canopy about threefold.
 
 ### Canopy weights by silvopasture type (user, 2026-11-23): dispersed-tree stands at their imagery-based tree cover (trees_perc), live fences, intensive silvopasture and isolated-tree crowns (points buffered 4 m) at 100%, forage banks excluded (0%).
 ### Each land-cover period's polygons are matched to the surveys as Farm_diversity's landscape-metrics script matches its ssp (the 'middle' layer by default, overwritten by the 'past' and 'ubc' layers in their data year, gaps filled from the same point's other years), and the area-based ssp is carried through the same steps as a check that the mapping is reproduced.
@@ -19,6 +19,8 @@ Wrangling_dir <- "../Ssp-bird-data-wrangling/Derived/"
 Trees_path <- "../../Mentorship/Digitization_Mathilde/Final_docs/final_shp_for_natalia/current_docs/individual_trees_final"
 Lc_periods <- c("middle", "past", "ubc")
 Buffer_m <- 300
+## The habitat-conversion scenarios that convert a point's own disc need the canopy-weighted silvopasture inside it
+Disc_m <- 50
 Crown_radius_m <- 4
 ## A dispersed-tree polygon counts as an isolated-tree crown when it has no trees_perc (crowns, crown fragments and pairs of crowns merged during snapping, 72-110 m2, 50-99% inside the crown buffers) or when at least this share of it lies within the crown radius of a digitized tree (crowns in the 'ubc' layer inherit the trees_perc of the polygon they were cut from)
 Crown_min_share <- 0.99
@@ -66,13 +68,27 @@ Ssp_period <- Poly_weights |>
             Stand_pct = 100 * sum(Area_m2 * (lc_typ == "distrees" & !Crown)) / sum(Area_m2),
             N_small_stands = sum(lc_typ == "distrees" & !Crown & Area_m2 < 500), .by = c(Lc_period, Id_survey))
 
+## The same shares within the Disc_m disc around each point count, from the polygons of that point's own buffer
+Discs <- st_buffer(select(Pc_locs, Disc_id = Id_survey), Disc_m)
+Ssp_disc_period <- Polys |>
+  select(Poly_id, Lc_period, Id_survey) |>
+  st_make_valid() |>
+  st_intersection(Discs) |>
+  filter(Id_survey == Disc_id) |>
+  mutate(Disc_m2 = as.numeric(st_area(geom))) |>
+  st_drop_geometry() |>
+  left_join(select(Poly_weights, Poly_id, lc_typ2, Canopy_weight), by = "Poly_id", relationship = "many-to-one") |>
+  summarise(Ssp_area_poly_50 = 100 * sum(Disc_m2 * (lc_typ2 == "ssp")) / sum(Disc_m2), Ssp_cw_50 = 100 * sum(Disc_m2 * Canopy_weight) / sum(Disc_m2), .by = c(Lc_period, Id_survey))
+Ssp_period <- left_join(Ssp_period, Ssp_disc_period, by = c("Lc_period", "Id_survey"), relationship = "one-to-one")
+stopifnot(!anyNA(Ssp_period$Ssp_cw_50))
+
 # Match periods to surveys ----
 ## The landscape-metrics tables give each period's ssp at 300 m and the data year its layer applies to ('past' and 'ubc' only)
 Lsm_300 <- map(Lc_periods, \(p) read_excel(list.files(Lsm_dir, pattern = paste0("Lsm_df_", p), full.names = TRUE)) |> filter(buffer == Buffer_m) |> select(Id_survey, ssp, any_of("data_year")) |> mutate(Lc_period = p)) |>
   bind_rows() |>
   inner_join(Ssp_period, by = c("Lc_period", "Id_survey"))
 Lsm_l <- split(Lsm_300, Lsm_300$Lc_period) |> map(\(d) select(d, -Lc_period) |> rename(any_of(c(Year = "data_year"))))
-Cw_cols <- c("ssp", "Ssp_area_poly", "Ssp_cw", "Crown_pct")
+Cw_cols <- c("ssp", "Ssp_area_poly", "Ssp_cw", "Crown_pct", "Ssp_area_poly_50", "Ssp_cw_50")
 Event_covs_pcs <- read_csv(paste0(Wrangling_dir, "Excels/Event_covs_pcs.csv"), show_col_types = FALSE)
 Event_ssp <- reduce(Lsm_l[c("ubc", "past")], \(acc, d) rows_update(acc, d, by = c("Id_survey", "Year"), unmatched = "ignore"),
                     .init = Event_covs_pcs |> select(Id_survey, Id_survey_no_dc, Year_grp, Year) |> left_join(select(Lsm_l$middle, -Year), by = "Id_survey")) |>
@@ -105,8 +121,8 @@ write_csv(Tree_counts, Trees_csv)
 # Export ----
 Event_ssp |>
   left_join(select(Tree_counts, Id_survey, Tree_n), by = "Id_survey", relationship = "many-to-one") |>
-  select(Id_survey, Year_grp, ssp, Ssp_area_poly, Ssp_cw, Crown_pct, Tree_n) |>
-  mutate(across(c(Ssp_area_poly, Ssp_cw, Crown_pct), \(x) round(x, 3))) |>
+  select(Id_survey, Year_grp, ssp, Ssp_area_poly, Ssp_cw, Crown_pct, Ssp_area_poly_50, Ssp_cw_50, Tree_n) |>
+  mutate(across(c(Ssp_area_poly, Ssp_cw, Crown_pct, Ssp_area_poly_50, Ssp_cw_50), \(x) round(x, 3))) |>
   arrange(Id_survey, Year_grp) |>
   write_csv(Out_csv)
 
