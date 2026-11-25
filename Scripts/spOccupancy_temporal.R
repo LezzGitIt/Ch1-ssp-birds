@@ -3,7 +3,7 @@
 # Model family: Bernoulli occupancy and Bernoulli detection with logit links (Polya-Gamma sampler); spatial NNGP exponential process with 2 latent factors, their loadings started at an earlier fit's posterior means; no AR(1) temporal effect (periods are unequally spaced 2013-2026), time enters as a fixed effect
 # Distance to the forest edge is hinge-coded: Dist_open (distance outside forest, 0 in forest) and Dist_inside (depth inside forest, 0 outside), so each side of the edge has its own slope and the habitat contrasts sit at the edge
 # svcTMsPGOcc with svc.cols = 1 is the same model as stMsPGOcc (seeded runs give bit-identical draws, 2026-11-02) but, unlike stMsPGOcc, accepts range.ind (species x location, so clipping is spatial, not seasonal)
-# Run headless with: nohup caffeinate -is Rscript Scripts/spOccupancy_temporal.R <section(s)> > <log> 2>&1 &  (sections: prec_hinge, dist_hinge, year_hinge, hab_ssp, split_hinge; or smoke for a 10-batch, 1-chain dimension check of every model)
+# Run headless with: nohup caffeinate -is Rscript -e 'source("Scripts/spOccupancy_temporal.R")' <model(s)> > <log> 2>&1 &  (models: prec_hinge, dist_hinge, year_hinge, hab_ssp, split_hinge, and the habitat-context and habitat-conversion models ctx1500, ctx1500_noht, full1500 and its variants; smoke for a 10-batch, 1-chain dimension check of every model, smoke_<model> for one); or set Rstudio_sections and source the script in RStudio; source() parses the whole file first, so editing the script during a fit cannot change it
 
 # Load libraries ----
 library(tidyverse)
@@ -14,14 +14,20 @@ filter <- dplyr::filter
 source("Scripts/spOcc_fns.R")
 
 # Configuration ----
+## Species set: "98" (species detected on at least 19 visits; every fit to date) or "278" (all species, range-clipped); both share the 459 surveyed location-periods and every covariate, and fit names carry the species count
+Species_set <- "98"
 ## Stacked list the temporal list is built from (one row per location x year-group x season), with the scaling of its covariates
-msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds"
-tmsOcc_l_path <- "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_98_hab_fix.rds"
+msOcc_l_path <- c(`98` = "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds", `278` = "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_278_hab_fix.rds")[[Species_set]]
+tmsOcc_l_path <- c(`98` = "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_98_hab_fix.rds", `278` = "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_278_hab_fix.rds")[[Species_set]]
 Scaling_path <- str_replace(msOcc_l_path, "\\.rds$", "_scaling.csv")
 ## Farm_diversity's landscape metrics (forest = % forest within 300 m, from the land cover matched to the survey year; survey ID to location code), the wrangling repo's site table (silvopasture type per location) and visit table (survey dates)
 Lsm_path <- "../Farm_diversity/Derived/Excels/Event_covs_lsm.csv"
 Site_covs_path <- "../Ssp-bird-data-wrangling/Derived/Excels/Site_covs.csv"
 Event_covs_path <- "../Ssp-bird-data-wrangling/Derived/Excels/Event_covs.csv"
+## Landscape canopy cover and woody canopy height in the ring from 50 m out to Ring_radius_m, per surveyed row (written by the scale-of-effect script, which chose 1.5 km), and the canopy-weighted silvopasture cover within 300 m (written by the silvopasture-canopy script)
+Fit_covs_path <- "Derived/Excels/Scale_of_effect_fit_covs.csv"
+Ring_radius_m <- 1500
+Ssp_canopy_path <- "Derived/Excels/Ssp_canopy_by_survey.csv"
 
 ## Site = physical location; time = year-group x season in chronological order (replicates stay the within-season visits, so closure is the same as in the stacked model)
 Site_col <- "Id_survey_no_dc"
@@ -30,8 +36,9 @@ Time_levels <- c("13-14.Early", "13-14.Late", "16-17.Early", "16-17.Late", "19.E
 ## The multi-season models need occupancy covariates in every site x period cell, including periods a location was not surveyed (no detection data there): covariates that describe the period are filled with the period mean, all other time-varying covariates with the location's value from its nearest surveyed period
 Period_covs <- "Survey_date"
 
-## Sections to run, from the command line; none when the script is sourced (builds the data only)
-run_sections <- commandArgs(trailingOnly = TRUE)
+## Models to fit (formula names below, or smoke / smoke_<name>): from the command line, or, when the script is sourced in RStudio, from Rstudio_sections (empty by default, so sourcing builds the data only)
+Rstudio_sections <- character(0)
+run_sections <- if (interactive()) Rstudio_sections else commandArgs(trailingOnly = TRUE)
 
 ## Time covariate: Year1 (first year of the year-group) reproduces the fitted model set (Multi_spp_100 rows 107-109, 111, 126); Survey_date (mean survey date of the location-period; user, 2026-11-09) for refits, whose names gain _date
 Time_cov <- "Year1"
@@ -49,20 +56,49 @@ occ_formulas <- list(
   split_hinge = ~ Habitat_split * Tot_prec + Dist_open + Dist_inside + ssp + Year1
 ) %>%
   map(\(f) as.formula(str_replace_all(deparse1(f), "Year1", Time_cov)))
-fit_tag <- \(model) paste0(model, if (Time_cov == "Survey_date") "_date", "_f2_inits")
+Hinge_models <- names(occ_formulas)
+
+## Habitat-context and habitat-conversion models (moved from the scale-of-effect script, 2026-11-24; their 98-species fits are in Model_output/Temporal/Scale_of_effect/, named soe_<model>): time enters as Year_cont, the mean survey date read as a long-term trend, and landscape canopy cover and woody canopy height as the 1.5 km ring terms
+## Context dependence of habitat on landscape forest (user, 2026-11-21): habitat by ring cover at the chosen 1.5 km radius, with the cover-by-height landscape forest adjustment as primary ('ctx1500') and without height as the sensitivity check ('ctx1500_noht'); habitat and rainfall additive. Data check (2026-11-21): 1.5 km cover overlaps across habitats (10th-90th percentile: silvopasture 12-44%, forest 21-44%, pasture 22-51%), but pasture spans only 17-56% on 6 farms, so silvopasture-vs-pasture contrasts below ~17% cover are extrapolated; no point count has low cover with tall canopy (r 0.68 overall, 0.82 within silvopasture)
+## Model for the habitat-conversion predictions ('full1500', user 2026-11-21): every habitat interaction whose community-level CrI excluded 0 when fitted alone, together in one model: habitat by 1.5 km ring cover (ctx1500), habitat by silvopasture cover within 300 m (Multi_spp_100 row 111) and habitat by rainfall (row 107: silvopasture 0.29 (-0.01, 0.58), P(>0) 0.96; kept although its CrI touches 0, user 2026-11-21). Dropped as unsupported: silvopasture's distance-to-edge slope (row 108: 0.08 (-0.19, 0.36))
+## Forest cover within 300 m added to the habitat-conversion model (user, 2026-11-22), so the habitat-specific ssp slopes are estimated holding forest within 300 m fixed: at forest points, at fixed pasture, each extra percentage point of ssp comes with 0.42 fewer points of forest, so without it the forest-point ssp slope can absorb forest loss, which the conversion scenarios (silvopasture replacing pasture only) would inherit. 'full1500_f300' adds one forest slope for all habitats; 'full1500_hf300' lets it differ by habitat, which adjusts the forest-point ssp slope even if forest matters more at forest points, at the risk of slow convergence (at pasture points forest within 300 m correlates -0.90 with distance to the forest edge)
+## Riparian forest indicator added to 'full1500_f300' (user, 2026-11-22): riparian forest points carry most of the high ssp at forest points (mean 14% vs 7.5% at secondary forest points), so the forest-point ssp slope may be picking up forest type; 'full1500_f300_rip' tests whether it shrinks once riparian forest has its own intercept
+## Quadratic landscape cover added to 'full1500_f300' (user, 2026-11-23): one squared term of the standardised 1.5 km ring cover, with a community mean and species-level slopes like every occupancy covariate, so each species' response to landscape cover can peak at a different cover; not interacted with habitat or height, since only ~9-13 independent 1.5 km landscapes inform the landscape terms. A community-level squared coefficient below 0 means occupancy peaks at intermediate landscape cover
+## Canopy-weighted silvopasture cover within 300 m in place of the area-based ssp (user, 2026-11-23): area-based ssp counts a sparse dispersed-tree stand like a dense one and overstates dispersed-tree canopy about threefold; 'full1500_f300_cw' is 'full1500_f300' with ssp replaced by Ssp_cw (dispersed-tree stands weighted by their imagery tree cover, live fences, intensive silvopasture and isolated-tree crowns at 100%, forage banks excluded), the model the landscape-silvopasture scenario would simulate from. The isolated-tree count is left out until its consistency across farms is judged (user, 2026-11-23)
+Context_base_formula <- ~ Habitat + Tot_prec + Dist_open + Dist_inside + ssp + Year_cont
+occ_formulas <- c(occ_formulas, list(
+  ctx1500 = update(Context_base_formula, ~ . + Habitat * Cover_h1500 + Cover_h1500 * Height_h1500),
+  ctx1500_noht = update(Context_base_formula, ~ . + Habitat * Cover_h1500),
+  full1500 = ~ Habitat * (Cover_h1500 + ssp + Tot_prec) + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont,
+  full1500_f300 = ~ Habitat * (Cover_h1500 + ssp + Tot_prec) + Forest_300 + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont,
+  full1500_hf300 = ~ Habitat * (Cover_h1500 + ssp + Tot_prec + Forest_300) + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont,
+  full1500_f300_rip = ~ Habitat * (Cover_h1500 + ssp + Tot_prec) + Forest_300 + Riparian + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont,
+  full1500_f300_q = ~ Habitat * (Cover_h1500 + ssp + Tot_prec) + Forest_300 + I(Cover_h1500^2) + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont,
+  full1500_f300_cw = ~ Habitat * (Cover_h1500 + Ssp_cw + Tot_prec) + Forest_300 + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont
+))
+## Fit name: model, then _date for the hinge models refitted with the mean survey date, the factor count, _inits when the loadings start from the earlier fit and _short for the shorter chains (so the existing 98-species fits keep their names, e.g. prec_hinge_f2_inits)
+fit_tag <- \(model) paste0(model, if (Time_cov == "Survey_date" && model %in% Hinge_models) "_date", "_f", N_factors, if (Lambda_start == "earlier_fit") "_inits", if (Chain_length == "short") "_short")
 det.formula <- ~ Forest_bin + Pc_start + I(Pc_start^2) + Prob_breed + Sampling_day_log + (1 | Collector_team_num)
 
 ## MCMC settings: 60,000 iterations, 30,000 burn-in, thinned by 75 (400 kept per chain); the species x site x period posterior arrays (z, psi, likelihood) are 3.6x the stacked size, and at 3,000 kept samples assembling them exceeded R's 18 GB memory limit (2026-10-30)
 batch.length <- 25
 mcmc_long <- list(n.batch = 2400, n.burn = 30000, n.thin = 75, n.chains = 3)
+## Shorter chains for screening runs such as choosing the number of factors: 24,000 iterations, 12,000 burn-in, thinned by 30 (still 400 kept per chain), 40% of the full length; row 107 refitted at this length matched it (all community coefficients within 0.08 posterior SD, max community Rhat 1.04), as in the scale-of-effect fits; "short" adds _short to the fit name
+mcmc_short <- list(n.batch = 960, n.burn = 12000, n.thin = 30, n.chains = 3)
+Chain_length <- "full"
 n.neighbors <- 5
 priors <- list(phi.unif = list(3 / 25e3, 3 / 23e3)) # effective spatial range 23-25 km
 ar1 <- FALSE
-## 2 spatial factors: with 3, factor 2 emptied even when started informative (Multi_spp_100 row 110); started at the posterior-mean loadings of the 2-factor signed-distance fit (row 90), where factor 2 was informative, because 2-factor runs started at 0 often collapsed it (Jeff Doser's remedy for loadings that won't converge); spOccupancy uses the same loadings start in every chain
+## Spatial factors: 2 for the 98 species (with 3, factor 2 emptied even when started informative; Multi_spp_100 row 110); the 278-species count is to be chosen by comparing fits (user, 2026-11-24)
+N_factors <- 2
+## Anchor species: spOccupancy fixes the first N_factors species' loadings (1 on their own factor, 0 on later factors) to identify the factors, so they should be common, well-detected species with contrasting habitat use; they move to the front in this order, the rest keep the data list's order, and species beyond N_factors have no effect. Tyrannus melancholicus and Manacus manacus lead the data list (the wrangling script's Order_meta), so the 2-factor fits keep their anchors; Sturnella magna is the pasture species (detected at 43% of pasture location-periods, 3% of forest), Momotus momota and Mesembrinibis cayennensis forest species, Thraupis episcopus a silvopasture-leaning species (user, 2026-11-24)
+Anchor_species <- c("Tyrannus_melancholicus", "Manacus_manacus", "Sturnella_magna", "Milvago_chimachima", "Crotophaga_ani", "Momotus_momota", "Thraupis_episcopus", "Mesembrinibis_cayennensis")
+## Loadings starting values: "earlier_fit" starts factors 1-2 at the posterior-mean loadings of the 2-factor signed-distance fit (row 90), where factor 2 was informative, because 2-factor runs started at 0 often collapsed it (Jeff Doser's remedy for loadings that won't converge), species that fit lacked and factors beyond 2 at 0; "zero" is spOccupancy's default (all free loadings at 0); spOccupancy uses the same loadings start in every chain
+Lambda_start <- "earlier_fit"
 Lambda_source_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_nofarm_long_f2_2026-11-05.rds"
 Lambda_inits_path <- "Derived/Rdata/Model_output/Temporal/lambda_inits_prec_nofarm_long_f2.rds"
 ## Settings passed to fit_temporal() (spOcc_fns.R); every fit is seeded so a rerun reproduces its draws exactly
-fit_settings <- list(det.formula = det.formula, priors = priors, n.neighbors = n.neighbors, n.factors = 2, batch.length = batch.length, ar1 = ar1, mcmc = mcmc_long, out_dir = "Derived/Rdata/Model_output/Temporal", seed = 20261107)
+fit_settings <- list(det.formula = det.formula, priors = priors, n.neighbors = n.neighbors, n.factors = N_factors, batch.length = batch.length, ar1 = ar1, mcmc = if (Chain_length == "short") mcmc_short else mcmc_long, out_dir = "Derived/Rdata/Model_output/Temporal", seed = 20261107)
 
 # Build the temporal list ----
 # Reshape the stacked list (rows = site x time) into the multi-season format of the vignette's hbefTrends data: y is species x site x time x replicate, site-constant occupancy covariates are site vectors, time-varying ones are site x time matrices, detection covariates are site x time x replicate arrays, and coords has one row per site; built once, then read from disk
@@ -165,22 +201,62 @@ if (is.null(oc$Survey_date)) {
   stopifnot(!anyNA(Date_raw))
   oc$Survey_date <- to_site_period((Date_raw - mean(Date_raw)) / sd(Date_raw), fill = "period_mean")
 }
+## The same mean survey date under the name the habitat-context models use (the long-term time trend)
+oc$Year_cont <- oc$Survey_date
+
+## Landscape canopy cover and woody canopy height in the 1.5 km ring, scaled over the surveyed location-periods; a ring with no canopy has no woody canopy height and takes the mean (0 once scaled), leaving its zero cover to the cover term
+Row_keys <- tibble(Id_survey = as.character(Stacked_oc$Id_survey), Year_grp = as.character(Stacked_oc$Year_grp), Season = as.character(Stacked_oc$Season))
+Ring_raw <- Row_keys %>%
+  left_join(read_csv(Fit_covs_path, col_types = cols(Id_survey = "c", Year_grp = "c", Season = "c")) %>% filter(Radius_m == Ring_radius_m), by = c("Id_survey", "Year_grp", "Season"), relationship = "one-to-one")
+stopifnot(!anyNA(Ring_raw$Cover_pct))
+scale_rows <- \(x) replace_na((x - mean(x, na.rm = TRUE)) / sd(x, na.rm = TRUE), 0)
+oc[[paste0("Cover_h", Ring_radius_m)]] <- to_site_period(scale_rows(Ring_raw$Cover_pct))
+oc[[paste0("Height_h", Ring_radius_m)]] <- to_site_period(scale_rows(Ring_raw$Height_m))
+
+## Riparian forest indicator, one value per location
+oc$Riparian <- to_site_period(riparian_forest(Stacked_oc$Habitat, Stacked_oc$Id_survey, Lsm_path, Site_covs_path))
+
+## Canopy-weighted silvopasture cover within 300 m, scaled over the surveyed location-periods
+Ssp_cw_raw <- Row_keys %>%
+  left_join(read_csv(Ssp_canopy_path, col_types = cols(Id_survey = "c", Year_grp = "c")) %>% select(Id_survey, Year_grp, Ssp_cw), by = c("Id_survey", "Year_grp"), relationship = "many-to-one") %>%
+  pull(Ssp_cw)
+stopifnot(!anyNA(Ssp_cw_raw))
+oc$Ssp_cw <- to_site_period(scale_rows(Ssp_cw_raw))
 tmsOcc_l$occ.covs <- oc
+
+## Anchor species first, in the order given (y and range clipping are species-first)
+stopifnot(all(Anchor_species %in% dimnames(tmsOcc_l$y)[[1]]), !anyDuplicated(Anchor_species), length(Anchor_species) >= N_factors)
+Species_order <- c(Anchor_species, setdiff(dimnames(tmsOcc_l$y)[[1]], Anchor_species))
+tmsOcc_l$y <- tmsOcc_l$y[Species_order, , , , drop = FALSE]
+if (!is.null(tmsOcc_l$range.ind)) tmsOcc_l$range.ind <- tmsOcc_l$range.ind[Species_order, , drop = FALSE]
 str(tmsOcc_l, max.level = 2)
 
 # Loadings starting values ----
-## Posterior means of the earlier fit's loadings (species x factor), computed once; matched to species by position, so the species order must equal the data's
+## Posterior means of the earlier fit's loadings (species x factor), computed once
 if (!file.exists(Lambda_inits_path)) {
   Lambda_source <- readRDS(Lambda_source_path)
   saveRDS(matrix(colMeans(Lambda_source$lambda.samples), nrow = length(Lambda_source$sp.names), dimnames = list(Lambda_source$sp.names, NULL)), Lambda_inits_path)
   rm(Lambda_source); gc()
 }
-lambda_inits <- list(lambda = list(readRDS(Lambda_inits_path)))
-stopifnot(identical(rownames(lambda_inits$lambda[[1]]), dimnames(tmsOcc_l$y)[[1]]))
+## Matched to species by name: the earlier fit's species keep its loadings on factors 1-2, other species and later factors start at 0; spOccupancy requires each anchor's own loading at 1 and its loadings on later factors at 0, and the earlier loadings are relative to its two anchors, so those must stay anchors 1-2
+lambda_inits <- if (Lambda_start == "earlier_fit") {
+  Lambda_earlier <- readRDS(Lambda_inits_path)
+  Fit_species <- dimnames(tmsOcc_l$y)[[1]]
+  stopifnot(all(rownames(Lambda_earlier) %in% Fit_species), identical(head(Fit_species, 2), head(rownames(Lambda_earlier), 2)))
+  Lambda <- matrix(0, length(Fit_species), N_factors, dimnames = list(Fit_species, NULL))
+  Lambda[rownames(Lambda_earlier), seq_len(min(2, N_factors))] <- Lambda_earlier[, seq_len(min(2, N_factors))]
+  Lambda[upper.tri(Lambda)] <- 0
+  diag(Lambda) <- 1
+  list(lambda = list(Lambda))
+}
 
 # Smoke test ----
-# Catches formula / dimension errors in about a minute per model; not for judging convergence
-if ("smoke" %in% run_sections) iwalk(occ_formulas, \(f, model) fit_temporal(tmsOcc_l, f, fit_tag(model), settings = fit_settings, inits = lambda_inits, smoke = TRUE))
+# 10 batches on 1 chain, nothing saved: catches formula / dimension errors in about a minute per model; not for judging convergence. 'smoke' checks every model, 'smoke_<model>' one
+Smoke_models <- if ("smoke" %in% run_sections) names(occ_formulas) else intersect(str_remove(str_subset(run_sections, "^smoke_"), "^smoke_"), names(occ_formulas))
+walk(Smoke_models, \(model) {
+  fit_temporal(tmsOcc_l, occ_formulas[[model]], fit_tag(model), settings = fit_settings, inits = lambda_inits, smoke = TRUE)
+  cat("Smoke fit OK:", model, "\n")
+})
 
 # Primary model: habitat x precipitation ----
 if ("prec_hinge" %in% run_sections) invisible(fit_temporal(tmsOcc_l, occ_formulas$prec_hinge, fit_tag("prec_hinge"), settings = fit_settings, inits = lambda_inits))
@@ -196,3 +272,9 @@ if ("hab_ssp" %in% run_sections) invisible(fit_temporal(tmsOcc_l, occ_formulas$h
 
 # Silvopasture split by type ----
 if ("split_hinge" %in% run_sections) invisible(fit_temporal(tmsOcc_l, occ_formulas$split_hinge, fit_tag("split_hinge"), settings = fit_settings, inits = lambda_inits))
+
+# Habitat by landscape canopy cover ----
+walk(intersect(c("ctx1500", "ctx1500_noht"), run_sections), \(model) fit_temporal(tmsOcc_l, occ_formulas[[model]], fit_tag(model), settings = fit_settings, inits = lambda_inits))
+
+# Habitat-conversion models ----
+walk(intersect(str_subset(names(occ_formulas), "^full1500"), run_sections), \(model) fit_temporal(tmsOcc_l, occ_formulas[[model]], fit_tag(model), settings = fit_settings, inits = lambda_inits))
