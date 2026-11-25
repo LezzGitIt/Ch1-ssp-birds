@@ -38,6 +38,8 @@ Period_covs <- "Survey_date"
 
 ## Models to fit (formula names below, or smoke / smoke_<name>): from the command line, or, when the script is sourced in RStudio, from Rstudio_sections (empty by default, so sourcing builds the data only)
 Rstudio_sections <- character(0)
+## Minutes to wait after building the data and running any smoke tests before the full fits start: staggers two fits launched together (e.g. two factor counts in two RStudio sessions) so their end-of-fit memory peaks do not coincide; 0 = start at once
+Start_delay_min <- 0
 run_sections <- if (interactive()) Rstudio_sections else commandArgs(trailingOnly = TRUE)
 
 ## Time covariate: Year1 (first year of the year-group) reproduces the fitted model set (Multi_spp_100 rows 107-109, 111, 126); Survey_date (mean survey date of the location-period; user, 2026-11-09) for refits, whose names gain _date
@@ -259,6 +261,12 @@ walk(Smoke_models, \(model) {
   fit_temporal(tmsOcc_l, occ_formulas[[model]], fit_tag(model), settings = fit_settings, inits = lambda_inits, smoke = TRUE)
   cat("Smoke fit OK:", model, "\n")
 })
+
+## Staggered start
+if (Start_delay_min > 0 && length(setdiff(run_sections, c("smoke", str_subset(run_sections, "^smoke_")))) > 0) {
+  cat("Waiting", Start_delay_min, "min before fitting, from", format(Sys.time(), "%H:%M"), "\n")
+  Sys.sleep(Start_delay_min * 60)
+}
 
 # Primary model: habitat x precipitation ----
 if ("prec_hinge" %in% run_sections) invisible(fit_temporal(tmsOcc_l, occ_formulas$prec_hinge, fit_tag("prec_hinge"), settings = fit_settings, inits = lambda_inits))
