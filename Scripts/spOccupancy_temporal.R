@@ -76,6 +76,8 @@ occ_formulas <- c(occ_formulas, list(
   full1500_f300_q = ~ Habitat * (Cover_h1500 + ssp + Tot_prec) + Forest_300 + I(Cover_h1500^2) + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont,
   full1500_f300_cw = ~ Habitat * (Cover_h1500 + Ssp_cw + Tot_prec) + Forest_300 + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont
 ))
+## Additive model with silvopasture split by type, the 278-species base model and the one the number of spatial factors is chosen on (user, 2026-11-24): every term additive, and every covariate the causal diagram requires for the direct effect of local habitat and the effect of silvopasture within 300 m (climate, forest within 300 m, landscape forest, time, the distance to the forest edge, and the spatial factors for unmeasured spatial causes); forest cover within 300 m is held so the silvopasture slope compares silvopasture with pasture rather than with forest, and landscape forest enters as 1.5 km canopy cover by woody canopy height, as in the habitat-conversion models
+occ_formulas$add_split <- ~ Habitat_split + Tot_prec + Dist_open + Dist_inside + Ssp_cw + Forest_300 + Cover_h1500 * Height_h1500 + Year_cont
 ## Fit name: model, then _date for the hinge models refitted with the mean survey date, the factor count, _inits when the loadings start from the earlier fit and _short for the shorter chains (so the existing 98-species fits keep their names, e.g. prec_hinge_f2_inits)
 fit_tag <- \(model) paste0(model, if (Time_cov == "Survey_date" && model %in% Hinge_models) "_date", "_f", N_factors, if (Lambda_start == "earlier_fit") "_inits", if (Chain_length == "short") "_short")
 det.formula <- ~ Forest_bin + Pc_start + I(Pc_start^2) + Prob_breed + Sampling_day_log + (1 | Collector_team_num)
@@ -278,3 +280,6 @@ walk(intersect(c("ctx1500", "ctx1500_noht"), run_sections), \(model) fit_tempora
 
 # Habitat-conversion models ----
 walk(intersect(str_subset(names(occ_formulas), "^full1500"), run_sections), \(model) fit_temporal(tmsOcc_l, occ_formulas[[model]], fit_tag(model), settings = fit_settings, inits = lambda_inits))
+
+# Additive model with silvopasture split by type ----
+if ("add_split" %in% run_sections) invisible(fit_temporal(tmsOcc_l, occ_formulas$add_split, fit_tag("add_split"), settings = fit_settings, inits = lambda_inits))

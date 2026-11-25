@@ -23,10 +23,10 @@ library(ggdag)
 # Simple DAG --------------------------------------------------------------
 # Specify relationships for simplified dag
 dag_simple <- dagify(
-  Biodiversity ~ Local_LC + Ssp_matrix + Climate + Unknown, #Time_since_planting + Landscape_forest + Elevation 
-  Ssp_matrix ~ Climate + Unknown,
+  Biodiversity ~ Local_LC + ssp_300m + Climate + Unknown, #Time_since_planting + Landscape_forest + Elevation 
+  ssp_300m ~ Climate + Unknown,
   Unknown ~ Spatial_auto,
-  exposure = c("Local_LC", "Ssp_matrix"), 
+  exposure = c("Local_LC", "ssp_300m"), 
   outcome = "Biodiversity",
   latent = c("Unknown") 
 )
@@ -50,19 +50,22 @@ dag_complex <- dagify(
   Biodiversity_obs ~ Biodiversity + Obs_skill + lc_50m, #+ Canopy_height
   Obs_skill ~ Sampling,
   Sampling ~ Time, 
-  Biodiversity ~ lc_50m + Ssp_matrix + Climate + Landscape_forest + Dist_forest + Time + Unknown, #Time_since_planting  + Elevation 
+  Biodiversity ~ lc_50m + ssp_300m + forest_300m + Climate + Landscape_forest + Dist_forest + Time + Unknown, #Time_since_planting  + Elevation 
   lc_50m ~ Time + Sampling + Farmer_values, 
-  Ssp_matrix ~ Climate + Farmer_values + Unknown,
+  ssp_300m ~ Climate + Farmer_values + Buffer_300m + Unknown,
+  forest_300m ~ Farmer_values + Climate + Buffer_300m,
   #Tree_characteristics ~ Time,
   Landscape_forest ~ Farmer_values + Sampling + Climate,
   Dist_forest ~ lc_50m,
   Unknown ~ Spatial_auto,
-  exposure = c("lc_50m"), #, "Ssp_matrix"
-  outcome = "Biodiversity" #, 
-  #latent = c("Unknown", "Farmer_values") #Tree_characteristics
+  exposure = c("lc_50m"), #, "ssp_300m"
+  outcome = "Biodiversity", 
+  latent = c("Buffer_300m") #"Unknown", "Farmer_values", Tree_characteristics
 )
 # Adjustment set - Remove latent variables to see
 adjustmentSets(dag_complex, type = "minimal") # all
+# Silvopasture and forest within 300 m share one fixed buffer area, so one share cannot rise without another falling (digitization choices, e.g. drawing a stand as forest or as dispersed trees, add to this): a backdoor path through forest within 300 m, closed by conditioning on it; the buffer is marked latent because it cannot be adjusted for separately from its shares
+adjustmentSets(dag_complex, exposure = "ssp_300m", type = "minimal")
 
 # Plot
 set.seed(123)
@@ -80,7 +83,7 @@ ggsave("Figures/DAGs/dag_complex.png", dag_complex_plot, width = 8, height = 6, 
 print(dag_complex_plot)
 
 
-# >No Ssp_matrix ----------------------------------------------------------
+# >No ssp_300m ----------------------------------------------------------
 # Unclear whether we really have the data to include silvopasture in the matrix, so this DAG just focuses on the local landcover within 50m  
 
 # Specify relationships
@@ -139,12 +142,12 @@ adjustmentSets(idag)
 idag_complex <- dagify(
   Biodiversity_obs ~ Biodiversity + Obs_skill,
   Obs_skill ~ Sampling,
-  Biodiversity ~ lc_50m + Ssp_matrix + Climate + Landscape_forest + Unknown + timeXlc_50m + Landscape_forestXlc_50m + climateXlc_50m + Time, #Time_since_planting  + Elevation
+  Biodiversity ~ lc_50m + ssp_300m + Climate + Landscape_forest + Unknown + timeXlc_50m + Landscape_forestXlc_50m + climateXlc_50m + Time, #Time_since_planting  + Elevation
   timeXlc_50m ~ Time + lc_50m + Sampling,
   Landscape_forestXlc_50m ~ Landscape_forest + lc_50m, 
   climateXlc_50m ~ Climate + lc_50m,
   lc_50m ~ Time + Farmer_values + Sampling, 
-  Ssp_matrix ~ Climate + Farmer_values + Unknown,
+  ssp_300m ~ Climate + Farmer_values + Unknown,
   Landscape_forest ~ Farmer_values + Time + Climate,
   Sampling ~ Time,
   Unknown ~ Spatial_auto,
