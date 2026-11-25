@@ -187,7 +187,7 @@ draws_alpha %>%
   plot_half_eye() + 
   labs(title = "117 species")
 
-ggsave("Figures/alpha_post_8fac.png", bg = "white") #beta
+ggsave("Figures/Diagnostics/alpha_post_8fac.png", bg = "white") #beta
 
 # Can play with bayesplot::mcmc_dens() function as well, or as.data.frame() to get posterior draws 
 
@@ -568,7 +568,7 @@ draws_alpha %>%
   #labs(title = "100 species")
 plogis(-2) # Low detection probability
 
-#ggsave("Figures/alpha_post_8fac.png", bg = "white") #beta
+#ggsave("Figures/Diagnostics/alpha_post_8fac.png", bg = "white") #beta
 # Can play with bayesplot::mcmc_dens() function as well, or as.data.frame() to get posterior draws 
   
 # >>Species-level coefficients ----------------------------------------------

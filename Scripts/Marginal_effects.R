@@ -33,10 +33,21 @@ plot_specs <- tribble(
   "soe_full1500",            "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_2026-11-21.rds", "Cover_h1500", "Habitat",
   "soe_full1500",            "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_2026-11-21.rds", "ssp",         "Habitat",
   "soe_full1500",            "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_2026-11-21.rds", "Tot_prec",    "Habitat",
-  # Habitat contrasts of the habitat-conversion model with forest cover within 300 m, without and with the riparian-forest indicator (2026-11-22); forest is non-riparian forest in the latter (fixed_vals)
-  "soe_full1500_f300",       "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_f300_2026-11-22.rds", NA,     "Habitat",
+  # Habitat-conversion model with forest cover within 300 m and canopy-weighted silvopasture within 300 m (2026-11-23), the model the conversion scenarios use: habitat contrasts and one figure per interaction
+  "soe_full1500_f300_cw",    "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_f300_cw_2026-11-23.rds", NA,            "Habitat",
+  "soe_full1500_f300_cw",    "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_f300_cw_2026-11-23.rds", "Cover_h1500", "Habitat",
+  "soe_full1500_f300_cw",    "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_f300_cw_2026-11-23.rds", "Ssp_cw",      "Habitat",
+  "soe_full1500_f300_cw",    "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_f300_cw_2026-11-23.rds", "Tot_prec",    "Habitat",
+  # Habitat contrasts of the same model with area-based silvopasture and the riparian-forest indicator (2026-11-22); forest is non-riparian forest (fixed_vals)
   "soe_full1500_f300_rip",   "Derived/Rdata/Model_output/Temporal/Scale_of_effect/Occ_mod_98spp_soe_full1500_f300_rip_2026-11-22.rds", NA, "Habitat"
 )
+# Canopy-weighted silvopasture within 300 m per survey (written by the silvopasture-canopy script), for the canopy-weighted fits
+Ssp_canopy_path <- "Derived/Excels/Ssp_canopy_by_survey.csv"
+# Figures go to a subfolder of Fig_root by model family: the habitat-conversion model the scenarios use, the earlier scale-of-effect fits, and (any tag not listed) the hinge-coded model set with its multi-panel figures
+Fig_root <- "Figures/Marginal_effects"
+Fig_subdirs <- c(soe_full1500_f300_cw = "Habitat_conversion", soe_ctx1500 = "Scale_of_effect", soe_ctx1500_noht = "Scale_of_effect", soe_full1500 = "Scale_of_effect", soe_full1500_f300_rip = "Scale_of_effect")
+Hinge_dir <- file.path(Fig_root, "Hinge_models")
+walk(file.path(Fig_root, unique(c(Fig_subdirs, "Hinge_models"))), \(d) dir.create(d, showWarnings = FALSE, recursive = TRUE))
 # Ring cover, woody canopy height and mean survey date per surveyed row (written by the scale-of-effect script), for the scale-of-effect fits, and the radius their terms use
 Fit_covs_path <- "Derived/Excels/Scale_of_effect_fit_covs.csv"
 Fit_covs_radius_m <- 1500
@@ -66,7 +77,7 @@ level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Live_fence = "Li
 level_colors <- c(Pasture = "#eda100", Silvopasture = "#6250d6", `Live fence` = "#a294f0", `Dispersed trees` = "#3d2a9e", Forest = "#008300")
 axis_labels <- c(
   Dist_forest = "Distance to forest edge (m; negative = inside forest)", Tot_prec = "Annual precipitation (mm)",
-  Year1 = "Year", Survey_date = "Year", Year_cont = "Year", ssp = "Silvopasture within 300 m (%)", Canopy_cover = "Forest cover within 1 km (%)", Cover_h1500 = "Canopy cover within 1.5 km (%)",
+  Year1 = "Year", Survey_date = "Year", Year_cont = "Year", ssp = "Silvopasture within 300 m (%)", Ssp_cw = "Silvopasture canopy within 300 m (%)", Canopy_cover = "Forest cover within 1 km (%)", Cover_h1500 = "Canopy cover within 1.5 km (%)",
   Habitat = "Habitat", Pc_start = "Start time (hours after midnight)", Prob_breed = "Breeding probability"
 )
 # Applied after back-transforming: offsets are added (Year1, in fits built before 2026-11-09, is stored as the two-digit first year of the year group; Survey_date is already in decimal years), divisors convert units (Pc_start is in seconds)
@@ -85,7 +96,7 @@ extract_vars <- function(term) {
 }
 
 # One figure: predictions from one fitted model along focal_cont (by focal_cat), axes in original units, saved under Figures/Marginal_effects/ and printed; covs and scaling come from the data list, settings from the configuration
-make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, covs, scaling, response, settings) {
+make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, covs, scaling, response, settings, out_dir) {
   Occ_mod <- readRDS(Occ_mod_path)
   show_species <- settings$show_species %||% (is.null(focal_cat) || is.null(focal_cont) || settings$facet_by_cat)
 
@@ -219,7 +230,7 @@ make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, c
     labs(x = if (is.null(focal_cont)) NULL else settings$axis_labels[x_var] %|% x_var, y = y_lab, color = NULL, fill = NULL, caption = if (settings$show_caption) str_wrap(caption, 110) else NULL) +
     theme(plot.caption = element_text(hjust = 0))
 
-  out_file <- paste0("Figures/Marginal_effects/marginal_", paste(c(model_tag, tolower(c(focal_cat, focal_cont))), collapse = "_"), if (settings$facet_by_cat) "_facet" else "", ".png")
+  out_file <- paste0(out_dir, "/marginal_", paste(c(model_tag, tolower(c(focal_cat, focal_cont))), collapse = "_"), if (settings$facet_by_cat) "_facet" else "", ".png")
   ggsave(out_file, marginal_plot, width = 8, height = 5.5, bg = "white")
   print(marginal_plot)
   # The returned plot keeps this function's environment, so drop the fit and prediction array, or every kept plot holds its ~2 GB fit
@@ -247,6 +258,13 @@ if (response == "occupancy") {
   covs$Forest_300 <- (Forest_raw - mean(Forest_raw)) / sd(Forest_raw)
   # Riparian forest indicator (1 at riparian forest points, 0 elsewhere), as in the habitat-conversion fits
   covs$Riparian <- riparian_forest(covs$Habitat, covs$Id_survey, Lsm_path, Site_covs_path)
+  # Canopy-weighted silvopasture within 300 m, scaled over the surveyed location-periods as in the fits, with its mean and SD added to the scaling table
+  Ssp_cw_raw <- tibble(Id_survey = as.character(covs$Id_survey), Year_grp = as.character(covs$Year_grp)) %>%
+    left_join(read_csv(Ssp_canopy_path, col_types = cols(Id_survey = "c", Year_grp = "c")) %>% select(Id_survey, Year_grp, Ssp_cw), by = c("Id_survey", "Year_grp"), relationship = "many-to-one") %>%
+    pull(Ssp_cw)
+  stopifnot(!anyNA(Ssp_cw_raw))
+  covs$Ssp_cw <- (Ssp_cw_raw - mean(Ssp_cw_raw)) / sd(Ssp_cw_raw)
+  scaling <- bind_rows(scaling, tibble(Process = "occupancy", Covariate = "Ssp_cw", Mean = mean(Ssp_cw_raw), SD = sd(Ssp_cw_raw)))
   # Scale-of-effect terms (ring cover and woody canopy height at Fit_covs_radius_m, mean survey date), scaled over the surveyed location-periods as in those fits, with their means and SDs added to the scaling table so the axis is back-transformed
   Fit_raw <- tibble(Id_survey = as.character(covs$Id_survey), Year_grp = as.character(covs$Year_grp), Season = as.character(covs$Season)) %>%
     left_join(read_csv(Fit_covs_path, col_types = cols(Id_survey = "c", Year_grp = "c", Season = "c")) %>% filter(Radius_m == Fit_covs_radius_m), by = c("Id_survey", "Year_grp", "Season"), relationship = "one-to-one") %>%
@@ -267,7 +285,7 @@ plot_settings <- list(
 )
 # NA in plot_specs means no focal variable of that kind
 marginal_plots <- pmap(plot_specs, \(model_tag, Occ_mod_path, focal_cont, focal_cat) {
-  make_marginal_plot(Occ_mod_path, model_tag, if (is.na(focal_cont)) NULL else focal_cont, if (is.na(focal_cat)) NULL else focal_cat, covs, scaling, response, plot_settings)
+  make_marginal_plot(Occ_mod_path, model_tag, if (is.na(focal_cont)) NULL else focal_cont, if (is.na(focal_cat)) NULL else focal_cat, covs, scaling, response, plot_settings, file.path(Fig_root, Fig_subdirs[model_tag] %|% "Hinge_models"))
 }) |> set_names(plot_specs$model_tag)
 
 # Distance to the forest edge ----
@@ -304,7 +322,7 @@ marginal_dist <- ggplot(dist_mean_df, aes(x = Dist_m)) +
   labs(x = axis_labels["Dist_forest"], y = "Mean occupancy across species", color = NULL, fill = NULL, caption = if (show_caption) str_wrap(dist_caption, 110) else NULL) +
   theme_bw() +
   theme(plot.caption = element_text(hjust = 0))
-ggsave(paste0("Figures/Marginal_effects/marginal_", Dist_model_tag, "_habitat_dist_forest.png"), marginal_dist, width = 8, height = 5.5, bg = "white")
+ggsave(paste0(Hinge_dir, "/marginal_", Dist_model_tag, "_habitat_dist_forest.png"), marginal_dist, width = 8, height = 5.5, bg = "white")
 print(marginal_dist)
 
 # Interaction figures ----
@@ -317,10 +335,10 @@ context_panels <- map(interaction_panels[c("prec", "dist")], \(p) p + theme(lege
 context_panels$dist <- context_panels$dist + labs(y = NULL)
 context_grid <- patchwork::wrap_plots(context_panels, ncol = 2) + patchwork::plot_annotation(tag_levels = "a") & theme(plot.tag.location = "margin")
 context_fig <- cowplot::plot_grid(shared_legend, context_grid, ncol = 1, rel_heights = c(0.08, 1))
-ggsave("Figures/Marginal_effects/marginal_context_panel.png", context_fig, width = 9, height = 4.2, bg = "white")
+ggsave(file.path(Hinge_dir, "marginal_context_panel.png"), context_fig, width = 9, height = 4.2, bg = "white")
 print(context_fig)
 ## Time and silvopasture cover within 300 m, one panel each
-ggsave("Figures/Marginal_effects/marginal_time_panel.png", interaction_panels$time, width = 5.5, height = 4.5, bg = "white")
+ggsave(file.path(Hinge_dir, "marginal_time_panel.png"), interaction_panels$time, width = 5.5, height = 4.5, bg = "white")
 print(interaction_panels$time)
-ggsave("Figures/Marginal_effects/marginal_ssp_cover_panel.png", interaction_panels$ssp_cover, width = 5.5, height = 4.5, bg = "white")
+ggsave(file.path(Hinge_dir, "marginal_ssp_cover_panel.png"), interaction_panels$ssp_cover, width = 5.5, height = 4.5, bg = "white")
 print(interaction_panels$ssp_cover)
