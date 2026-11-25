@@ -111,7 +111,8 @@ plot_gof <- function(gof_tbl){
 
 ## Fit summary
 # Condense a fitted multi-species model (object or .rds path) into a small list holding everything the model log (spOcc_model_notes.xlsx) records, plus the community-level draws, so a fit made on another machine can be logged and its community effects explored without moving the multi-GB fit; saved as an .rds when save_path is given (default for a path input: the fit's name with a _summary suffix)
-summarize_fit <- function(fit, save_path = NULL, gof = FALSE){
+# gof_draws: number of posterior draws the goodness-of-fit check uses, drawn at random (gof_seed) from all chains; NULL uses every draw
+summarize_fit <- function(fit, save_path = NULL, gof = FALSE, gof_draws = 200, gof_seed = 1){
   if (is.character(fit)) {
     if (is.null(save_path)) save_path <- sub("\\.rds$", "_summary.rds", fit)
     fit_file <- basename(fit)
@@ -172,6 +173,21 @@ summarize_fit <- function(fit, save_path = NULL, gof = FALSE){
   )
   # Goodness of fit (slow: posterior predictive replicates of every species x site); the log's Site_bayes_p / Rep_bayes_p are the means of the species p-values
   if (gof) {
+    # Cap the draws by subsetting every *.samples element with the same draw indices, so each kept draw stays a joint draw (latent occupancy, detection coefficients, random effects); the fit is then treated as one chain of gof_draws
+    n_total <- fit$n.post * fit$n.chains
+    if (!is.null(gof_draws) && gof_draws < n_total) {
+      set.seed(gof_seed)
+      keep <- sort(sample.int(n_total, gof_draws))
+      for (el in grep("\\.samples$", names(fit), value = TRUE)) {
+        x <- fit[[el]]
+        # Skip settings that share the suffix (n.samples) and anything not stored draws-first
+        if (is.null(dim(x)) || dim(x)[1] != n_total) next
+        fit[[el]] <- if (length(dim(x)) == 2) coda::mcmc(x[keep, , drop = FALSE]) else do.call(`[`, c(list(x, keep), rep(list(TRUE), length(dim(x)) - 1), drop = FALSE))
+      }
+      fit$n.post <- gof_draws
+      fit$n.chains <- 1
+    }
+    out$gof_draws <- fit$n.post * fit$n.chains
     gof_tbl <- dplyr::bind_rows(lapply(run_ppc(fit), calc_bayes_p_ms))
     out$gof_species <- gof_tbl
     out$gof_mean <- tapply(gof_tbl$bayes_p, gof_tbl$group, mean)
