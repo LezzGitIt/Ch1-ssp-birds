@@ -16,18 +16,33 @@ set.seed(20261105)
 Ft <- read_csv("../Fd-pd/Derived/Functional_traits_ch1.csv")
 
 # Occupancy model output
-Occ_mod_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_1ecor_temporal_prec_nofarm_long_2026-10-31.rds"
+Occ_mod_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_hinge_f2_inits_2026-11-08.rds"
 Occ_mod <- readRDS(Occ_mod_path)
+# Stacked list the model's data were built from, for the distance-to-forest scaling and forest's reference depth
+msOcc_l_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds"
+source("Scripts/spOcc_fns.R")
 
 # Contrasts ---------------------------------------------------------------
-# Species' habitat effects regressed on traits: silvopasture vs pasture (the HabitatSsp coefficient) and silvopasture vs forest (HabitatSsp minus HabitatBosque within each draw, the contrast a refit with forest as the reference would estimate, up to the community prior)
+# Species' habitat effects regressed on traits: silvopasture vs pasture and silvopasture vs forest, each on the logit scale within each draw
 contrasts <- c("Ssp_vs_pasture", "Ssp_vs_forest")
+### Habitats compared at a distance to the forest edge each one's data support, as in the marginal-effects figures and the report: pasture and silvopasture at a shared distance outside forest, forest at its median depth inside forest
+# Silvopasture vs pasture is the HabitatSsp coefficient, as both open habitats share the reference distance and distance enters additively; silvopasture vs forest is (HabitatSsp + Dist_open slope x reference distance) minus (HabitatBosque + Dist_inside slope x reference depth), since the raw HabitatSsp minus HabitatBosque compares them at the forest edge, where no pasture point lies
+Ref_open_m <- 100
 
 # Format ------------------------------------------------------------------
+# Reference distances on the hinge terms' scale (metres divided by the distance-to-forest SD, without centring)
+occ_covs <- readRDS(msOcc_l_path)$occ.covs
+Dist_scaling <- read_csv(str_replace(msOcc_l_path, "\\.rds$", "_scaling.csv"), show_col_types = FALSE) %>% filter(Process == "occupancy", Covariate == "Dist_forest")
+Ref_depth_m <- forest_reference_depth(occ_covs$Dist_forest * Dist_scaling$SD + Dist_scaling$Mean, occ_covs$Habitat == "Bosque", occ_covs$Id_survey, occ_covs$Year_grp)
+d_open <- Ref_open_m / Dist_scaling$SD
+d_in <- Ref_depth_m / Dist_scaling$SD
 # Rows correspond to the posterior MCMC samples and the columns correspond to species
 beta_draws <- as.data.frame(as.matrix(Occ_mod$beta.samples))
 species_draws <- function(term) beta_draws %>% select(starts_with(paste0(term, "-"))) %>% rename_with(~str_remove(., paste0(term, "-")))
-y_draws_l <- list(Ssp_vs_pasture = species_draws("HabitatSsp"), Ssp_vs_forest = species_draws("HabitatSsp") - species_draws("HabitatBosque"))[contrasts]
+y_draws_l <- list(
+  Ssp_vs_pasture = species_draws("HabitatSsp"),
+  Ssp_vs_forest = (species_draws("HabitatSsp") + species_draws("Dist_open") * d_open) - (species_draws("HabitatBosque") + species_draws("Dist_inside") * d_in)
+)[contrasts]
 # Species order (and the threatened-species section) from the silvopasture vs pasture draws
 y_draws <- y_draws_l$Ssp_vs_pasture
 

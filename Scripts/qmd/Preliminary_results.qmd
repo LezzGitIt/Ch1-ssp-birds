@@ -43,6 +43,8 @@ split_p_strong <- 0.9
 # Stacked list the multi-season list was built from (one row per surveyed location x survey period), for the data summary
 stacked_list_path <- "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds"
 traits_path <- "../Fd-pd/Derived/Functional_traits_ch1.csv"
+# Habitats are compared at a distance to the forest edge each one's data support, as in the marginal-effects figures: pasture and silvopasture at this shared distance outside forest (m; inside both habitats' interquartile ranges, while no pasture point lies closer than ~33 m to forest), forest at its median depth inside forest (computed below)
+ref_open_m <- 100
 # Trait-model summaries for both contrasts (silvopasture vs pasture, silvopasture vs forest)
 posthoc_path <- paste0("Derived/Excels/postHoc_traits_", sub("\\.rds$", "", basename(model_path)), ".csv")
 nmds_cache_path <- "Derived/Rdata/nmds/nmds_habitat_temporal_split_hinge_f2_inits_98_posterior_K50_dim3_distavg.rds"
@@ -125,20 +127,29 @@ years <- range(as.numeric(paste0("20", str_extract(covs$Year_grp, "^\\d{2}"))), 
 n_species <- length(fit$sp_names)
 min_detections <- min(apply(fit$y, 1, sum, na.rm = TRUE))
 
-## Community-level habitat effects (logit scale; relative to pasture, other covariates at their means)
+## Reference distances on the hinge terms' scale (metres divided by the distance-to-forest SD): pasture and silvopasture at ref_open_m outside forest, forest at its median depth over the surveyed forest location-year-groups
+dist_scaling <- read_csv(str_replace(stacked_list_path, "\\.rds$", "_scaling.csv"), show_col_types = FALSE) %>% filter(Process == "occupancy", Covariate == "Dist_forest")
+source("Scripts/spOcc_fns.R")
+ref_depth_m <- forest_reference_depth(covs$Dist_forest * dist_scaling$SD + dist_scaling$Mean, covs$Habitat == "Bosque", covs$Id_survey, covs$Year_grp)
+d_open <- ref_open_m / dist_scaling$SD
+d_in <- ref_depth_m / dist_scaling$SD
+# Caption wording for the distance reference
+dist_ref_text <- paste0("pasture and silvopasture ", ref_open_m, " m from the forest edge and forest at its median depth inside forest (", round(ref_depth_m), " m)")
+
+## Community-level habitat effects (logit scale; relative to pasture, other covariates at their means); forest contrasts compare forest at its reference depth with the open habitats at their reference distance
 bc <- fit$beta_comm
 ssp_vs_pasture <- bc[, "HabitatSsp"]
-forest_vs_pasture <- bc[, "HabitatBosque"]
-ssp_vs_forest <- bc[, "HabitatSsp"] - bc[, "HabitatBosque"]
+forest_vs_pasture <- bc[, "HabitatBosque"] + d_in * bc[, "Dist_inside"] - d_open * bc[, "Dist_open"]
+ssp_vs_forest <- ssp_vs_pasture - forest_vs_pasture
 max_rhat_comm <- max(map_dbl(fits, \(f) max(f$rhat_comm)))
 
 ## Community-average predicted occupancy in each habitat: per draw, the mean across species of each species' predicted probability (as in the marginal-effects figures)
 coef_draws <- function(term) fit$beta[, paste0(term, "-", fit$sp_names)]
 b0 <- coef_draws("(Intercept)")
 occ_hab <- list(
-  Pasture = rowMeans(plogis(b0)),
-  Silvopasture = rowMeans(plogis(b0 + coef_draws("HabitatSsp"))),
-  Forest = rowMeans(plogis(b0 + coef_draws("HabitatBosque")))
+  Pasture = rowMeans(plogis(b0 + d_open * coef_draws("Dist_open"))),
+  Silvopasture = rowMeans(plogis(b0 + coef_draws("HabitatSsp") + d_open * coef_draws("Dist_open"))),
+  Forest = rowMeans(plogis(b0 + coef_draws("HabitatBosque") + d_in * coef_draws("Dist_inside")))
 )
 
 ## Species-level silvopasture effects with the number of visits with a detection
@@ -187,18 +198,19 @@ split <- readRDS(split_summary_path)
 split_bc <- split_fit$beta_comm
 lf_vs_pasture <- split_bc[, "Habitat_splitLive_fence"]
 dt_vs_pasture <- split_bc[, "Habitat_splitDispersed_trees"]
-split_forest_vs_pasture <- split_bc[, "Habitat_splitBosque"]
+split_forest_vs_pasture <- split_bc[, "Habitat_splitBosque"] + d_in * split_bc[, "Dist_inside"] - d_open * split_bc[, "Dist_open"]
 lf_vs_dt <- lf_vs_pasture - dt_vs_pasture
 lf_vs_forest <- lf_vs_pasture - split_forest_vs_pasture
 dt_vs_forest <- dt_vs_pasture - split_forest_vs_pasture
 # Community-average predicted occupancy in each habitat, as for the primary model above
 split_coef <- function(term) split_fit$beta[, paste0(term, "-", split_fit$sp_names)]
 split_b0 <- split_coef("(Intercept)")
+split_open <- d_open * split_coef("Dist_open")
 occ_split <- list(
-  Pasture = rowMeans(plogis(split_b0)),
-  Live_fence = rowMeans(plogis(split_b0 + split_coef("Habitat_splitLive_fence"))),
-  Dispersed_trees = rowMeans(plogis(split_b0 + split_coef("Habitat_splitDispersed_trees"))),
-  Forest = rowMeans(plogis(split_b0 + split_coef("Habitat_splitBosque")))
+  Pasture = rowMeans(plogis(split_b0 + split_open)),
+  Live_fence = rowMeans(plogis(split_b0 + split_coef("Habitat_splitLive_fence") + split_open)),
+  Dispersed_trees = rowMeans(plogis(split_b0 + split_coef("Habitat_splitDispersed_trees") + split_open)),
+  Forest = rowMeans(plogis(split_b0 + split_coef("Habitat_splitBosque") + d_in * split_coef("Dist_inside")))
 )
 split_tau_median <- apply(split$draws$tau.sq.beta[, c("Habitat_splitLive_fence", "Habitat_splitDispersed_trees")], 2, median)
 # Per-species difference between live fence and dispersed trees (logit), from each species' two coefficients
@@ -338,7 +350,7 @@ Species differed far more in their response to dispersed trees than to live fenc
 
 ```{r}
 #| label: fig-habitat
-#| fig-cap: "Mean predicted occupancy probability across bird species in monoculture pasture, the two silvopasture types (live fences and dispersed trees) and forest, from the primary model with silvopasture split by type. Coloured points are posterior means and bars are 95% credible intervals of the mean across species of each species' predicted occupancy, at the forest edge, with other covariates held at their means and the spatial effect at zero. Grey points are the posterior means of individual species."
+#| fig-cap: !expr paste0("Mean predicted occupancy probability across bird species in monoculture pasture, the two silvopasture types (live fences and dispersed trees) and forest, from the primary model with silvopasture split by type. Coloured points are posterior means and bars are 95% credible intervals of the mean across species of each species' predicted occupancy, with ", dist_ref_text, ", other covariates held at their means and the spatial effect at zero. Grey points are the posterior means of individual species.")
 #| out-width: "85%"
 include_graphics(file.path("../..", fig_paths["habitat"]), error = FALSE)
 ```
@@ -378,7 +390,7 @@ Each habitat interaction was fit in a separate model.`r if (fits$Year1$n_factors
 
 ```{r}
 #| label: fig-context
-#| fig-cap: "Mean predicted occupancy across species in each habitat (posterior mean and 95% credible band) along (a) annual precipitation and (b) distance to the forest edge (negative distances are inside forest). Distance to the forest edge entered as a piecewise linear effect with a fixed breakpoint at the forest edge, allowing separate slopes outside and inside forest and a habitat-specific step at the edge, so habitats are compared at the forest edge. Each curve spans the values observed in that habitat; other covariates are held at their means, with distance to forest edge held at 0 in (a). Interactions were fit in separate models to improve sampling and convergence."
+#| fig-cap: !expr paste0("Mean predicted occupancy across species in each habitat (posterior mean and 95% credible band) along (a) annual precipitation and (b) distance to the forest edge (negative distances are inside forest). Distance to the forest edge entered as a piecewise linear effect with a fixed breakpoint at the forest edge, allowing separate slopes outside and inside forest and a habitat-specific step at the edge. Each curve spans the values observed in that habitat; other covariates are held at their means, with ", dist_ref_text, " in (a). Interactions were fit in separate models to improve sampling and convergence.")
 #| out-width: "100%"
 include_graphics(file.path("../..", fig_paths["context"]), error = FALSE)
 ```
@@ -389,7 +401,7 @@ Communities are expected to pay an extinction debt in fragmented landscapes. Per
 
 ```{r}
 #| label: fig-time
-#| fig-cap: "Mean predicted occupancy across species in each habitat (posterior mean and 95% credible band) by survey year, from the model with a habitat-by-year interaction. Each curve spans the values observed in that habitat; other covariates are held at their means, with distance at the forest edge."
+#| fig-cap: !expr paste0("Mean predicted occupancy across species in each habitat (posterior mean and 95% credible band) by survey year, from the model with a habitat-by-year interaction. Each curve spans the values observed in that habitat; other covariates are held at their means, with ", dist_ref_text, ".")
 #| out-width: "70%"
 include_graphics(file.path("../..", fig_paths["time"]), error = FALSE)
 ```
@@ -400,7 +412,7 @@ Does silvopasture in the surrounding landscape benefit birds in nearby pasture a
 
 ```{r}
 #| label: fig-ssp-cover
-#| fig-cap: "Mean predicted occupancy across species in each habitat (posterior mean and 95% credible band) along the percentage of silvopasture within 300 m, from the model with a habitat-by-silvopasture-cover interaction. Each curve spans the values observed in that habitat; other covariates are held at their means, with distance at the forest edge and forest cover within 300 m at its mean."
+#| fig-cap: !expr paste0("Mean predicted occupancy across species in each habitat (posterior mean and 95% credible band) along the percentage of silvopasture within 300 m, from the model with a habitat-by-silvopasture-cover interaction. Each curve spans the values observed in that habitat; other covariates are held at their means, with ", dist_ref_text, ", and forest cover within 300 m at its mean.")
 #| out-width: "70%"
 include_graphics(file.path("../..", fig_paths["ssp_cover"]), error = FALSE)
 ```
@@ -420,7 +432,7 @@ include_graphics(file.path("../..", fig_paths["nmds"]), error = FALSE)
 
 To ask whether species' traits explain their response to silvopasture, I regressed each species' silvopasture effect (relative to pasture) on its traits, carrying the full posterior of the occupancy model into each regression. I tested `r n_traits` traits in `r n_trait_models` models covering morphology, eye size, life history, ecological specialization, clutch size, nest location and nest enclosure (@fig-traits). `r if (n_trait_excl0 == 0) "No trait clearly explained species' responses: every coefficient's 95% CrI overlapped zero" else paste(n_trait_excl0, "of the", nrow(posthoc_terms), "coefficients had a 95% CrI excluding zero")`, and the models explained little variation (median Bayesian R² from `r sprintf("%.2f", min(posthoc$Bayes_R2))` to `r sprintf("%.2f", max(posthoc$Bayes_R2))`). The clearest tendencies, with P(\>0) ≥ `r trait_p_strong` or ≤ `r 1 - trait_p_strong` (coloured in @fig-traits), were `r knitr::combine_words(strong_traits$Text)`.
 
-Because silvopasture is intermediate in structure between pasture and forest, I also regressed each species' silvopasture effect relative to forest (its silvopasture minus its forest coefficient, within each posterior draw) on the same traits (@fig-traits b). `r if (n_trait_excl0_forest == 0) "No coefficient's 95% CrI excluded zero" else paste(n_trait_excl0_forest, "of the", nrow(posthoc_forest_terms), "coefficients had a 95% CrI excluding zero")` (median Bayesian R² from `r sprintf("%.2f", min(posthoc_forest$Bayes_R2))` to `r sprintf("%.2f", max(posthoc_forest$Bayes_R2))`); the clearest tendencies were `r knitr::combine_words(strong_traits_forest$Text)`.
+Because silvopasture is intermediate in structure between pasture and forest, I also regressed each species' silvopasture effect relative to forest (its predicted logit-scale occupancy in silvopasture minus that in forest within each posterior draw, with `r dist_ref_text`) on the same traits (@fig-traits b). `r if (n_trait_excl0_forest == 0) "No coefficient's 95% CrI excluded zero" else paste(n_trait_excl0_forest, "of the", nrow(posthoc_forest_terms), "coefficients had a 95% CrI excluding zero")` (median Bayesian R² from `r sprintf("%.2f", min(posthoc_forest$Bayes_R2))` to `r sprintf("%.2f", max(posthoc_forest$Bayes_R2))`); the clearest tendencies were `r knitr::combine_words(strong_traits_forest$Text)`.
 
 ```{r}
 #| label: fig-traits
@@ -448,7 +460,7 @@ posthoc_all %>%
 
 ## Takeaways
 
-- **Silvopasture supports more birds than monoculture pasture, but fewer than forest.** At the forest edge, mean predicted occupancy across species was `r sprintf("%.2f", mean(occ_hab$Pasture))` in pasture, `r sprintf("%.2f", mean(occ_hab$Silvopasture))` in silvopasture and `r sprintf("%.2f", mean(occ_hab$Forest))` in forest (silvopasture vs. pasture P(\>0) = `r fmt_p(ssp_vs_pasture)`).
+- **Silvopasture supports more birds than monoculture pasture, but fewer than forest.** With pasture and silvopasture `r ref_open_m` m from the forest edge and forest at its median depth (`r round(ref_depth_m)` m), mean predicted occupancy across species was `r sprintf("%.2f", mean(occ_hab$Pasture))` in pasture, `r sprintf("%.2f", mean(occ_hab$Silvopasture))` in silvopasture and `r sprintf("%.2f", mean(occ_hab$Forest))` in forest (silvopasture vs. pasture P(\>0) = `r fmt_p(ssp_vs_pasture)`).
 - **The benefit is broad but uneven across species.** `r n_sp_pos` of `r n_species` species had a clearly positive silvopasture effect and `r n_sp_neg` had a clearly negative one; the Near Threatened Blackpoll Warbler had `r if (striata_rank == 1) "the largest" else paste("the", scales::ordinal(striata_rank), "largest")` effect.
 - **Context matters.** The benefit of silvopasture over pasture increased with annual precipitation (P(\>0) = `r fmt_p(interaction_draws$Tot_prec$ssp)`), suggesting silvopasture may benefit biodiversity more in wetter climates than in more xeric ones. Occupancy fell with distance from the forest edge in both pasture and silvopasture at a similar rate, so proximity to forest raised occupancy in both habitats rather than the benefit of silvopasture specifically.
   - Mean occupancy across species is highest at the edge of forest fragments (@fig-context b).

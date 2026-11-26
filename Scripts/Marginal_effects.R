@@ -68,8 +68,13 @@ show_caption <- FALSE
 pred_n <- 200
 ci_level <- 0.95
 # Optional override of the default value of any non-focal covariate, on the model's (scaled) scale, e.g. list(Year1 = 0, Habitat = "Ssp")
-# Hinge-coded fits: distance terms at the forest edge, where the habitat contrasts are defined; forest cover within 300 m at its mean; the riparian indicator at 0 (non-riparian forest), as pasture and silvopasture points are never riparian
-fixed_vals <- list(Dist_open = 0, Dist_inside = 0, Forest_300 = 0, Riparian = 0)
+# Forest cover within 300 m at its mean; the riparian indicator at 0 (non-riparian forest), as pasture and silvopasture points are never riparian
+fixed_vals <- list(Forest_300 = 0, Riparian = 0)
+### Hinge-coded fits: distance terms at a reference supported by each habitat's data, set per habitat in the prediction grid (overrides fixed_vals for these two terms)
+# Pasture and silvopasture share one distance outside forest, because their siting difference (silvopasture points sit closer to forest) is confounding, not part of the habitat effect; 100 m lies inside both habitats' interquartile ranges. No pasture point lies closer than ~33 m to forest, so the edge (0 m) is outside the pasture data.
+Ref_open_m <- 100
+# Forest sits at its median depth inside forest over the surveyed forest location-year-groups (computed in Load data), as depth is a consequence of being forest and has no counterpart in the open habitats
+hinge_ref_m <- c(Dist_open = Ref_open_m, Dist_inside = NA)
 
 # Display names and colours (same palette as the NMDS figure)
 level_labels <- c(Pastizales = "Pasture", Ssp = "Silvopasture", Live_fence = "Live fence", Dispersed_trees = "Dispersed trees", Bosque = "Forest", N = "Not in forest", Y = "In forest")
@@ -142,6 +147,14 @@ make_marginal_plot <- function(Occ_mod_path, model_tag, focal_cont, focal_cat, c
   # Categorical variables keep all their levels so model.matrix() builds their columns
   if (!is.null(focal_cat)) pred_df[[focal_cat]] <- factor(pred_df[[focal_cat]], levels = levels(factor(covs[[focal_cat]])))
   for (v in names(held)) pred_df[[v]] <- if (is.factor(covs[[v]])) factor(held[[v]], levels = levels(covs[[v]])) else held[[v]]
+  # Non-focal hinge distance terms at each habitat's reference (metres, scaled by the distance SD): open habitats at the shared distance outside forest, forest at its reference depth; each term is 0 on the other side of the edge
+  if (!is.null(settings$hinge_ref_m) && all(c("Dist_open", "Dist_inside") %in% names(held))) {
+    hab_var <- intersect(c(focal_cat, "Habitat_split", "Habitat"), names(pred_df))[1]
+    in_forest <- as.character(pred_df[[hab_var]]) == "Bosque"
+    dist_sd <- filter(scaling, Process == "occupancy", Covariate == "Dist_forest")$SD
+    pred_df$Dist_open <- if_else(in_forest, 0, settings$hinge_ref_m[["Dist_open"]] / dist_sd)
+    pred_df$Dist_inside <- if_else(in_forest, settings$hinge_ref_m[["Dist_inside"]] / dist_sd, 0)
+  }
 
   ## Design matrix with exactly the model's columns
   # Stops if a level in the data has no column in the model (e.g. a Mosaic level left in a list whose model was fit without it), which would otherwise be predicted silently as the reference level
@@ -249,6 +262,9 @@ covs <- map(covs, \(x) if (is.data.frame(x) || is.matrix(x)) unlist(as.data.fram
 if (response == "occupancy") {
   Dist_scaling <- filter(scaling, Process == "occupancy", Covariate == "Dist_forest")
   covs[c("Dist_open", "Dist_inside")] <- hinge_distance(covs$Dist_forest * Dist_scaling$SD + Dist_scaling$Mean, covs$Habitat == "Bosque", Dist_scaling$SD)
+  # Forest's reference depth: median depth inside forest (m) over the surveyed forest location-year-groups
+  hinge_ref_m[["Dist_inside"]] <- forest_reference_depth(covs$Dist_forest * Dist_scaling$SD + Dist_scaling$Mean, covs$Habitat == "Bosque", covs$Id_survey, covs$Year_grp)
+  cat("Hinge reference: open habitats", hinge_ref_m[["Dist_open"]], "m outside forest, forest", round(hinge_ref_m[["Dist_inside"]], 1), "m inside\n")
   covs$Habitat_split <- split_ssp(covs$Habitat, covs$Id_survey, Lsm_path, Site_covs_path)
   # Forest cover within 300 m, scaled over the surveyed location-periods as in the fits
   Forest_raw <- tibble(Id_survey = as.character(covs$Id_survey), Year_grp = covs$Year_grp) %>%
@@ -279,7 +295,7 @@ if (response == "occupancy") {
 
 # Plot --------------------------------------------------------------------
 plot_settings <- list(
-  pred_n = pred_n, ci_level = ci_level, restrict_to_observed = restrict_to_observed, fixed_vals = fixed_vals,
+  pred_n = pred_n, ci_level = ci_level, restrict_to_observed = restrict_to_observed, fixed_vals = fixed_vals, hinge_ref_m = hinge_ref_m,
   facet_by_cat = facet_by_cat, show_species = show_species, show_caption = show_caption, level_labels = level_labels, level_colors = level_colors,
   axis_labels = axis_labels, axis_offsets = axis_offsets, axis_divisors = axis_divisors, integer_axes = integer_axes
 )

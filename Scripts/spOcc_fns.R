@@ -227,6 +227,12 @@ hinge_distance <- function(dist_m, is_forest, dist_sd) {
   list(Dist_open = ifelse(is_forest, 0, pmax(dist_m, 0)) / dist_sd, Dist_inside = ifelse(is_forest, pmax(-dist_m, 0), 0) / dist_sd)
 }
 
+# Forest's reference depth for habitat contrasts on hinge-coded fits: median depth inside forest (m) over the distinct forest location-year-groups, so a location surveyed in several seasons of one year-group counts once; dist_m, is_forest, location and year_grp are aligned vectors (dist_m signed as in hinge_distance())
+forest_reference_depth <- function(dist_m, is_forest, location, year_grp) {
+  depth_m <- pmax(-dist_m[is_forest], 0)
+  stats::median(depth_m[!duplicated(data.frame(location[is_forest], year_grp[is_forest], depth_m))])
+}
+
 # Habitat subtype (Habitat_sub, e.g. the silvopasture type or the forest type) of each survey ID, from the wrangling repo's site table, keyed by location code, which the landscape-metrics table maps from survey IDs
 habitat_subtype <- function(id_survey, lsm_path, site_covs_path) {
   location_codes <- dplyr::distinct(readr::read_csv(lsm_path, show_col_types = FALSE), Id_survey = as.character(Id_survey), Id_survey_no_dc)
