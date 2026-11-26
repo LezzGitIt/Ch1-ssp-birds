@@ -319,6 +319,12 @@ ss_l$occ.covs$Passage <- replace(1 * (Day_lp[Keep_site, Keep_time] < Passage_end
 Surveyed_kept <- apply(ss_l$y, 1:2, \(v) any(!is.na(v)))
 cat("Forest cover within 300 m (%) by habitat, surveyed location-periods:", paste(names(hab_f <- tapply(ss_l$occ.covs$Forest_300[Surveyed_kept] * Forest_scale[["SD"]] + Forest_scale[["Mean"]], matrix(as.character(ss_l$occ.covs$Habitat), nrow(Surveyed_kept), ncol(Surveyed_kept))[Surveyed_kept], mean)), round(hab_f), collapse = ", "), "| r with Dist_inside", round(cor(ss_l$occ.covs$Forest_300[Surveyed_kept], ss_l$occ.covs$Dist_inside[Surveyed_kept]), 2), "| r with ssp", round(cor(ss_l$occ.covs$Forest_300[Surveyed_kept], ss_l$occ.covs$ssp[Surveyed_kept]), 2), "\n")
 cat("Silvopasture sub-types (locations kept):", paste(names(table(ss_l$occ.covs$Habitat_split)), table(ss_l$occ.covs$Habitat_split), collapse = ", "), "\n")
+## Distance reference for habitat comparisons, as in the 98-species analysis: no pasture point lies closer than ~33 m to forest, so habitats are not compared at the forest edge; pasture and silvopasture share one distance outside forest (their siting difference is confounding), forest sits at its median depth inside forest over the surveyed forest location-year-groups
+Ref_open_m <- 100
+Signed_kept_m <- (ss_l$occ.covs$Dist_open - ss_l$occ.covs$Dist_inside) * Dist_sd$SD
+Hab_kept <- matrix(as.character(ss_l$occ.covs$Habitat), nrow(Surveyed_kept), ncol(Surveyed_kept))
+Ref_depth_m <- forest_reference_depth(Signed_kept_m[Surveyed_kept], Hab_kept[Surveyed_kept] == "Bosque", row(Surveyed_kept)[Surveyed_kept], str_remove(Periods_kept, "\\..*$")[col(Surveyed_kept)][Surveyed_kept])
+cat("Distance reference: open habitats", Ref_open_m, "m outside forest, forest", round(Ref_depth_m, 1), "m inside | distance outside forest (m) IQR,", paste(map_chr(c("Pastizales", "Ssp"), \(h) paste(h, paste(round(quantile(Signed_kept_m[Surveyed_kept & Hab_kept == h], c(0.25, 0.75))), collapse = "-"))), collapse = "; "), "\n")
 ## Multi-species list: the same covariates and coordinates with the migrants' detections and their range indicators
 ms_l <- c(list(y = y_ms[, Keep_site, Keep_time, , drop = FALSE]), ss_l[c("occ.covs", "det.covs", "coords")], list(range.ind = Migrants_l$range.ind[Migrants, Keep_site, drop = FALSE]))
 stopifnot(identical(ms_l$y[Species, , , ], ss_l$y))
@@ -379,7 +385,7 @@ if ("smoke" %in% run_sections) walk(Fit_variants[if (length(Run_variants)) Run_v
 if (!"smoke" %in% run_sections) walk(Fit_variants[Run_variants], fit_variant)
 
 # Rainfall interaction plot ----
-## Occupancy against annual and driest-month rainfall by habitat (posterior median and 95% CrI, other covariates at their means, distance terms at the forest edge), drawn over each habitat's observed rainfall range; points are farms, since rainfall varies only between farms: the posterior mean of latent occupancy (z) averaged over the farm's surveyed location-periods, sized by location-periods (detection-corrected, unlike the share of location-periods with a detection, which sits below the curves wherever detection < 1)
+## Occupancy against annual and driest-month rainfall by habitat (posterior median and 95% CrI, other covariates at their means, pasture and silvopasture at the reference distance outside forest and forest at its reference depth), drawn over each habitat's observed rainfall range; points are farms, since rainfall varies only between farms: the posterior mean of latent occupancy (z) averaged over the farm's surveyed location-periods, sized by location-periods (detection-corrected, unlike the share of location-periods with a detection, which sits below the curves wherever detection < 1)
 if ("plot_rain" %in% run_sections) {
   Rain_fits <- c(Annual = "tot_free", `Driest month` = "dry_free")
   Rain_terms <- c(Annual = "Tot_prec", `Driest month` = "Driest_prec")
@@ -408,7 +414,7 @@ if ("plot_rain" %in% run_sections) {
       mutate(Rainfall = rain, x = (mm - Rain_scale[[rain]][1]) / Rain_scale[[rain]][2],
              draws = map2(Habitat, x, \(h, x) {
                code <- names(Hab_labels)[Hab_labels == h]
-               eta <- b[, "(Intercept)"] + b[, term] * x
+               eta <- b[, "(Intercept)"] + b[, term] * x + if (code == "Bosque") b[, "Dist_inside"] * Ref_depth_m / Dist_sd$SD else b[, "Dist_open"] * Ref_open_m / Dist_sd$SD
                if (code != "Pastizales") eta <- eta + b[, paste0("Habitat", code)] + b[, paste0("Habitat", code, ":", term)] * x
                plogis(eta)
              }),
