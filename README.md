@@ -36,7 +36,7 @@ Run from the repository root (open `Ch1-ssp-birds.Rproj`). Survey tables, point 
 | `Scripts/qmd/Preliminary_results.qmd` | Preliminary results report (Word, plus PDF with `--to pdf`; rendered to `Derived/Scripts/qmd/`): reads the fits directly plus the marginal-effects and NMDS figures, the NMDS ellipse counts and the post-hoc trait summary, so run those three scripts on the same fit first |
 | `Scripts/qmd/Migrant_report.qmd` | Migrant report (PDF and Word, rendered to `Derived/Scripts/qmd/`): sources `Migrant_occupancy.R` for its data (no fits run) and reads the saved fits and the ring comparison tables, and, for the supplementary tables of migrants outside Meta, the point counts, survey table and traits of `../Ssp-bird-data-wrangling/`; its supplementary sensitivity checks are a child document, `Scripts/qmd/_Migrant_report_sensitivity.qmd`, knitted in only when `show_sensitivity` is TRUE in the config chunk (FALSE for the collaborator version) |
 | `Scripts/spOcc_fns.R` | Shared functions, sourced by the scripts above, including `fit_temporal()`, which fits and saves one multi-season model |
-| `Scripts/DAGs.R`, `Scripts/qmd/Math.qmd` | Causal diagrams and model notation |
+| `Scripts/DAGs.R`, `Scripts/qmd/Math.qmd` | Causal diagrams and model notation; `DAGs.R` also tests the main DAG's implied conditional independencies among the measured covariates (`Derived/Excels/DAG_local_tests.csv`, `Figures/DAGs/dag_complex_local_tests.png`; needs the `CCP` package) |
 
 Data lists and fitted models are saved under `Derived/Rdata/`, split by data structure: `Model_input/Stacked/` and `Model_input/Temporal/` (data lists), `Model_output/Stacked/` and `Model_output/Temporal/` (fits).
 
