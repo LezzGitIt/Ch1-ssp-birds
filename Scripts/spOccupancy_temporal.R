@@ -89,18 +89,19 @@ batch.length <- 25
 mcmc_long <- list(n.batch = 2400, n.burn = 30000, n.thin = 75, n.chains = 3)
 ## Shorter chains for screening runs such as choosing the number of factors: 24,000 iterations, 12,000 burn-in, thinned by 30 (still 400 kept per chain), 40% of the full length; row 107 refitted at this length matched it (all community coefficients within 0.08 posterior SD, max community Rhat 1.04), as in the scale-of-effect fits; "short" adds _short to the fit name
 mcmc_short <- list(n.batch = 960, n.burn = 12000, n.thin = 30, n.chains = 3)
-Chain_length <- "short"
+Chain_length <- "long"
 n.neighbors <- 5
 priors <- list(phi.unif = list(3 / 25e3, 3 / 23e3)) # effective spatial range 23-25 km
 ar1 <- FALSE
-## Spatial factors: 2 for the 98 species (with 3, factor 2 emptied even when started informative; Multi_spp_100 row 110); the 278-species count is to be chosen by comparing fits (user, 2026-11-24)
-N_factors <- 1
+## Spatial factors: 2 for the 98 species (with 3, factor 2 emptied even when started informative; Multi_spp_100 row 110); 2 for the 278 species (Meta_gradient rows 79-82, 2026-11-26): once mirror-image chains are sign-aligned both factors are informative and converged, and the 3- and 4-factor fits carry the same second axis rotated across their extra factors, with no informative third axis
+N_factors <- 2
 ## Anchor species: spOccupancy fixes the first N_factors species' loadings (1 on their own factor, 0 on later factors) to identify the factors, so they should be common, well-detected species with contrasting habitat use; they move to the front in this order, the rest keep the data list's order, and species beyond N_factors have no effect. Tyrannus melancholicus and Manacus manacus lead the data list (the wrangling script's Order_meta), so the 2-factor fits keep their anchors; Sturnella magna is the pasture species (detected at 43% of pasture location-periods, 3% of forest), Momotus momota and Mesembrinibis cayennensis forest species, Thraupis episcopus a silvopasture-leaning species (user, 2026-11-24)
 Anchor_species <- c("Tyrannus_melancholicus", "Manacus_manacus", "Sturnella_magna", "Milvago_chimachima", "Crotophaga_ani", "Momotus_momota", "Thraupis_episcopus", "Mesembrinibis_cayennensis")
-## Loadings starting values: "earlier_fit" starts factors 1-2 at the posterior-mean loadings of the 2-factor signed-distance fit (row 90), where factor 2 was informative, because 2-factor runs started at 0 often collapsed it (Jeff Doser's remedy for loadings that won't converge), species that fit lacked and factors beyond 2 at 0; "zero" is spOccupancy's default (all free loadings at 0); spOccupancy uses the same loadings start in every chain
-Lambda_start <- "zero"
-Lambda_source_path <- "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_nofarm_long_f2_2026-11-05.rds"
-Lambda_inits_path <- "Derived/Rdata/Model_output/Temporal/lambda_inits_prec_nofarm_long_f2.rds"
+## Loadings starting values: "earlier_fit" starts factors 1-2 at an earlier fit's posterior-mean loadings, species that fit lacked and factors beyond 2 at 0; "zero" is spOccupancy's default (all free loadings at 0). spOccupancy uses the same loadings start in every chain, so from "zero" each chain's early path decides the sign of a factor whose anchor loads weakly, and chains can settle in mirror-image modes (the 278-species factor screen, where both anchors load weakly); starting every chain at sign-aligned loadings keeps them in one mode
+## 98 species: the 2-factor signed-distance fit (row 90), where factor 2 was informative, because 2-factor runs started at 0 often collapsed it (Jeff Doser's remedy for loadings that won't converge). 278 species: the 2-factor add_split short fit with its chains sign-aligned to the majority mode (Meta_gradient row 82), written on the laptop from the loadings extracted on the remote (2026-11-26), so it has no source fit here
+Lambda_start <- "earlier_fit"
+Lambda_source_path <- c(`98` = "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_nofarm_long_f2_2026-11-05.rds", `278` = NA)[[Species_set]]
+Lambda_inits_path <- c(`98` = "Derived/Rdata/Model_output/Temporal/lambda_inits_prec_nofarm_long_f2.rds", `278` = "Derived/Rdata/Model_output/Temporal/lambda_inits_278spp_add_split_f2_aligned.rds")[[Species_set]]
 ## Settings passed to fit_temporal() (spOcc_fns.R); every fit is seeded so a rerun reproduces its draws exactly
 fit_settings <- list(det.formula = det.formula, priors = priors, n.neighbors = n.neighbors, n.factors = N_factors, batch.length = batch.length, ar1 = ar1, mcmc = if (Chain_length == "short") mcmc_short else mcmc_long, out_dir = "Derived/Rdata/Model_output/Temporal", seed = 20261107)
 
@@ -237,12 +238,13 @@ str(tmsOcc_l, max.level = 2)
 
 # Loadings starting values ----
 ## Posterior means of the earlier fit's loadings (species x factor), computed once
-if (!file.exists(Lambda_inits_path)) {
+if (Lambda_start == "earlier_fit" && !file.exists(Lambda_inits_path)) {
+  if (is.na(Lambda_source_path)) stop("Loadings starting values not found: ", Lambda_inits_path)
   Lambda_source <- readRDS(Lambda_source_path)
   saveRDS(matrix(colMeans(Lambda_source$lambda.samples), nrow = length(Lambda_source$sp.names), dimnames = list(Lambda_source$sp.names, NULL)), Lambda_inits_path)
   rm(Lambda_source); gc()
 }
-## Matched to species by name: the earlier fit's species keep its loadings on factors 1-2, other species and later factors start at 0; spOccupancy requires each anchor's own loading at 1 and its loadings on later factors at 0, and the earlier loadings are relative to its two anchors, so those must stay anchors 1-2
+## Matched to species by name: the earlier fit's species keep its loadings on factors 1-2, other species and later factors start at 0; spOccupancy requires each anchor's own loading at 1 and its loadings on later factors at 0, and the earlier loadings are relative to its two anchors, so those must stay anchors 1-2 (for 3+ factors the third anchor's loadings on factors 1-2 also start at the earlier fit's values)
 lambda_inits <- if (Lambda_start == "earlier_fit") {
   Lambda_earlier <- readRDS(Lambda_inits_path)
   Fit_species <- dimnames(tmsOcc_l$y)[[1]]
