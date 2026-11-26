@@ -133,6 +133,25 @@ summarize_fit <- function(fit, save_path = NULL, gof = FALSE, gof_draws = 200, g
   # Multi-season fits return WAIC per species; sum it to the community total
   waic <- spOccupancy::waicOcc(fit)
   if (!is.null(dim(waic))) waic <- colSums(waic[, c("elpd", "pD", "WAIC")])
+  # Loadings with each factor's chains sign-aligned to chain 1: a factor's sign is pinned only by its anchor's fixed loading of 1, so when the anchor loads weakly a chain can settle in the mirror-image mode (the spatial factor and every free loading negated), which leaves the other species' predictions unchanged but makes pooled loading CrIs span 0 and the loadings look empty (278-species factor screen, 2026-11-26); a chain's free loadings on a factor are negated when their chain means correlate negatively with chain 1's, and the negated chains are listed in loadings_by_factor
+  if (!is.null(fit$lambda.samples)) {
+    lambda <- as.matrix(fit$lambda.samples)
+    lambda_factor <- rep(rep(seq_len(fit$q), each = dim(fit$y)[1]), length.out = ncol(lambda))
+    lambda_free <- apply(lambda, 2, stats::sd) > 0
+    mirrored_chains <- lapply(seq_len(fit$q), function(f) {
+      cols <- which(lambda_factor == f & lambda_free)
+      if (fit$n.chains < 2 || length(cols) < 3) return(integer(0))
+      ref <- colMeans(lambda[chain == 1, cols, drop = FALSE])
+      Filter(function(k) stats::cor(ref, colMeans(lambda[chain == k, cols, drop = FALSE])) < 0, 2:fit$n.chains)
+    })
+    for (f in seq_len(fit$q)) for (k in mirrored_chains[[f]]) {
+      cols <- which(lambda_factor == f & lambda_free)
+      lambda[chain == k, cols] <- -lambda[chain == k, cols]
+    }
+    lambda_chains <- coda::mcmc.list(lapply(seq_len(fit$n.chains), function(k) coda::mcmc(lambda[chain == k, lambda_free, drop = FALSE])))
+    lambda_ess <- coda::effectiveSize(lambda_chains)
+    lambda_rhat <- if (fit$n.chains > 1) coda::gelman.diag(lambda_chains, autoburnin = FALSE, multivariate = FALSE)$psrf[, 1] else rep(NA_real_, sum(lambda_free))
+  }
   git_commit <- tryCatch(system("git rev-parse --short HEAD", intern = TRUE, ignore.stderr = TRUE), error = function(e) NA_character_, warning = function(w) NA_character_)
   out <- list(
     file = fit_file, class = class(fit), date = Sys.Date(),
@@ -149,25 +168,25 @@ summarize_fit <- function(fit, save_path = NULL, gof = FALSE, gof_draws = 200, g
     rhat = fit$rhat[intersect(c("beta.comm", "tau.sq.beta", "alpha.comm", "tau.sq.alpha", "sigma.sq.psi", "sigma.sq.p", "theta"), names(fit$rhat))],
     ess = fit$ESS[intersect(c("beta.comm", "tau.sq.beta", "alpha.comm", "tau.sq.alpha", "sigma.sq.psi", "sigma.sq.p", "theta"), names(fit$ESS))],
     min_ess = ess_all[which.min(ess_all)],
-    loadings_median_ess = if (is.null(fit$ESS$lambda)) NA else stats::median(fit$ESS$lambda[fit$ESS$lambda > 0 & is.finite(fit$ESS$lambda)]),
+    loadings_median_ess = if (is.null(fit$lambda.samples)) NA else stats::median(lambda_ess),
     percent_problematic = 100 * mean(rhat_param > 1.1 | ess_param < 100),
     n_comm_rhat_gt_1.1 = sum(rhat_comm > 1.1), max_comm_rhat = max(rhat_comm),
     n_beta_rhat_gt_1.1 = sum(fit$rhat$beta > 1.1), n_beta = length(fit$rhat$beta), max_beta_rhat = max(fit$rhat$beta),
     # Species-level coefficients (occupancy and detection) above Rhat 1.1, named term-species and sorted worst first
     species_rhat_gt_1.1 = sort(stats::setNames(c(fit$rhat$beta, fit$rhat$alpha), c(colnames(fit$beta.samples), colnames(fit$alpha.samples)))[c(fit$rhat$beta, fit$rhat$alpha) > 1.1], decreasing = TRUE),
-    # Per spatial factor: share of species whose loading CrI excludes 0, mean absolute loading and median loading ESS; a last factor with few non-zero loadings suggests enough factors, one still loading on many species suggests more are needed. Loadings are ordered species within factor; the fixed loadings (1 on the diagonal, 0 above it) are excluded
+    # Per spatial factor, on the sign-aligned loadings: the chains negated to align them, share of species whose loading CrI excludes 0, mean absolute loading, median loading ESS and Rhat; a last factor with few non-zero loadings suggests enough factors, one still loading on many species suggests more are needed. Loadings are ordered species within factor; the fixed loadings (1 on the diagonal, 0 above it) are excluded. With 3+ factors the extra factors can also rotate among themselves across chains, which sign alignment does not undo, so empty-looking extra factors are worth a rotation check before being called empty
     loadings_by_factor = if (is.null(fit$lambda.samples)) NULL else {
-      lambda <- as.matrix(fit$lambda.samples)
-      factor <- rep(rep(seq_len(fit$q), each = dim(fit$y)[1]), length.out = ncol(lambda))
-      free <- apply(lambda, 2, stats::sd) > 0
       lambda_ci <- apply(lambda, 2, stats::quantile, c(.025, .5, .975))
+      free_factor <- lambda_factor[lambda_free]
       data.frame(factor = seq_len(fit$q),
-                 n_free = as.vector(tapply(free, factor, sum)),
-                 share_ci_excl_0 = as.vector(tapply((lambda_ci[1, ] > 0 | lambda_ci[3, ] < 0)[free], factor[free], mean)),
-                 mean_abs_loading = as.vector(tapply(abs(lambda_ci[2, ])[free], factor[free], mean)),
-                 median_ess = as.vector(tapply(fit$ESS$lambda[free], factor[free], stats::median)))
+                 n_free = as.vector(tapply(lambda_free, lambda_factor, sum)),
+                 mirrored_chains = vapply(mirrored_chains, paste, character(1), collapse = ","),
+                 share_ci_excl_0 = as.vector(tapply((lambda_ci[1, ] > 0 | lambda_ci[3, ] < 0)[lambda_free], free_factor, mean)),
+                 mean_abs_loading = as.vector(tapply(abs(lambda_ci[2, ])[lambda_free], free_factor, mean)),
+                 median_ess = as.vector(tapply(lambda_ess, free_factor, stats::median)),
+                 median_rhat = as.vector(tapply(lambda_rhat, free_factor, stats::median)))
     },
-    mean_geweke =if (is.null(fit$lambda.samples)) NA else mean(abs(coda::geweke.diag(coda::as.mcmc(fit$lambda.samples))$z), na.rm = TRUE),
+    mean_geweke = if (is.null(fit$lambda.samples)) NA else mean(abs(coda::geweke.diag(coda::as.mcmc(lambda[, lambda_free, drop = FALSE]))$z), na.rm = TRUE),
     waic = waic,
     chain_medians = list(beta.comm = chain_medians(fit$beta.comm.samples), tau.sq.beta = chain_medians(fit$tau.sq.beta.samples), sigma.sq.psi = chain_medians(fit$sigma.sq.psi.samples))
   )
