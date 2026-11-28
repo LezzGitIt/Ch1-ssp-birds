@@ -14,11 +14,11 @@ filter <- dplyr::filter
 source("Scripts/spOcc_fns.R")
 
 # Configuration ----
-## Species set: "98" (species detected on at least 19 visits; every fit to date) or "278" (all species, range-clipped); both share the 459 surveyed location-periods and every covariate, and fit names carry the species count
-Species_set <- "278"
+## Species set: "97" (species detected on at least 19 visits) or "275" (all species, range-clipped), both on the land cover as corrected on 2026-11-27 (the fits to date used the earlier land cover: 98 and 278 species, 459 location-periods); both share the 457 surveyed location-periods and every covariate, and fit names carry the species count
+Species_set <- "97"
 ## Stacked list the temporal list is built from (one row per location x year-group x season), with the scaling of its covariates
-msOcc_l_path <- c(`98` = "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_98_hab_fix_jit1cm.rds", `278` = "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_278_hab_fix.rds")[[Species_set]]
-tmsOcc_l_path <- c(`98` = "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_98_hab_fix.rds", `278` = "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_278_hab_fix.rds")[[Species_set]]
+msOcc_l_path <- c(`97` = "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_97_lc2711.rds", `275` = "Derived/Rdata/Model_input/Stacked/msOcc_l_meta_275_lc2711.rds")[[Species_set]]
+tmsOcc_l_path <- c(`97` = "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_97_lc2711.rds", `275` = "Derived/Rdata/Model_input/Temporal/tmsOcc_l_meta_275_lc2711.rds")[[Species_set]]
 Scaling_path <- str_replace(msOcc_l_path, "\\.rds$", "_scaling.csv")
 ## Farm_diversity's landscape metrics (forest = % forest within 300 m, from the land cover matched to the survey year; survey ID to location code), the wrangling repo's site table (silvopasture type per location) and visit table (survey dates)
 Lsm_path <- "../Farm_diversity/Derived/Excels/Event_covs_lsm.csv"
@@ -80,6 +80,10 @@ occ_formulas <- c(occ_formulas, list(
 ))
 ## Additive model with silvopasture split by type, the 278-species base model and the one the number of spatial factors is chosen on (user, 2026-11-24): every term additive, and every covariate the causal diagram requires for the direct effect of local habitat and the effect of silvopasture within 300 m (climate, forest within 300 m, landscape forest, time, the distance to the forest edge, and the spatial factors for unmeasured spatial causes); forest cover within 300 m is held so the silvopasture slope compares silvopasture with pasture rather than with forest, and landscape forest enters as 1.5 km canopy cover by woody canopy height, as in the habitat-conversion models
 occ_formulas$add_split <- ~ Habitat_split + Tot_prec + Dist_open + Dist_inside + Ssp_cw + Forest_300 + Cover_h1500 * Height_h1500 + Year_cont
+## Habitat-specific trend over time on the DAG base (user, 2026-11-27): kept out of the habitat-conversion models because the time interaction does not change their predictions, but a target in its own right
+occ_formulas$add_split_year <- ~ Habitat_split * Year_cont + Tot_prec + Dist_open + Dist_inside + Ssp_cw + Forest_300 + Cover_h1500 * Height_h1500
+## Habitat-conversion model with silvopasture split by type (user, 2026-11-27): every habitat interaction of 'full1500_f300_cw' except time, with live fence and dispersed trees each given their own slopes; fitted first, with the unsplit 'full1500_f300_cw' as the fallback if it proves too complex to converge
+occ_formulas$full1500_f300_cw_split <- ~ Habitat_split * (Cover_h1500 + Ssp_cw + Tot_prec) + Forest_300 + Cover_h1500 * Height_h1500 + Dist_open + Dist_inside + Year_cont
 ## Fit name: model, then _date for the hinge models refitted with the mean survey date, the factor count, _inits when the loadings start from the earlier fit and _short for the shorter chains (so the existing 98-species fits keep their names, e.g. prec_hinge_f2_inits)
 fit_tag <- \(model) paste0(model, if (Time_cov == "Survey_date" && model %in% Hinge_models) "_date", "_f", N_factors, if (Lambda_start == "earlier_fit") "_inits", if (Chain_length == "short") "_short")
 det.formula <- ~ Forest_bin + Pc_start + I(Pc_start^2) + Prob_breed + Sampling_day_log + (1 | Collector_team_num)
@@ -100,8 +104,8 @@ Anchor_species <- c("Tyrannus_melancholicus", "Manacus_manacus", "Sturnella_magn
 ## Loadings starting values: "earlier_fit" starts factors 1-2 at an earlier fit's posterior-mean loadings, species that fit lacked and factors beyond 2 at 0; "zero" is spOccupancy's default (all free loadings at 0). spOccupancy uses the same loadings start in every chain, so from "zero" each chain's early path decides the sign of a factor whose anchor loads weakly, and chains can settle in mirror-image modes (the 278-species factor screen, where both anchors load weakly); starting every chain at sign-aligned loadings keeps them in one mode
 ## 98 species: the 2-factor signed-distance fit (row 90), where factor 2 was informative, because 2-factor runs started at 0 often collapsed it (Jeff Doser's remedy for loadings that won't converge). 278 species: the 2-factor add_split short fit with its chains sign-aligned to the majority mode (Meta_gradient row 82), written on the laptop from the loadings extracted on the remote (2026-11-26), so it has no source fit here
 Lambda_start <- "earlier_fit"
-Lambda_source_path <- c(`98` = "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_nofarm_long_f2_2026-11-05.rds", `278` = NA)[[Species_set]]
-Lambda_inits_path <- c(`98` = "Derived/Rdata/Model_output/Temporal/lambda_inits_prec_nofarm_long_f2.rds", `278` = "Derived/Rdata/Model_output/Temporal/lambda_inits_278spp_add_split_f2_aligned.rds")[[Species_set]]
+Lambda_source_path <- c(`97` = "Derived/Rdata/Model_output/Temporal/Occ_mod_98spp_prec_nofarm_long_f2_2026-11-05.rds", `275` = NA)[[Species_set]]
+Lambda_inits_path <- c(`97` = "Derived/Rdata/Model_output/Temporal/lambda_inits_prec_nofarm_long_f2.rds", `275` = "Derived/Rdata/Model_output/Temporal/lambda_inits_278spp_add_split_f2_aligned.rds")[[Species_set]]
 ## Settings passed to fit_temporal() (spOcc_fns.R); every fit is seeded so a rerun reproduces its draws exactly
 fit_settings <- list(det.formula = det.formula, priors = priors, n.neighbors = n.neighbors, n.factors = N_factors, batch.length = batch.length, ar1 = ar1, mcmc = if (Chain_length == "short") mcmc_short else mcmc_long, out_dir = "Derived/Rdata/Model_output/Temporal", seed = 20261107)
 
@@ -248,7 +252,10 @@ if (Lambda_start == "earlier_fit" && !file.exists(Lambda_inits_path)) {
 lambda_inits <- if (Lambda_start == "earlier_fit") {
   Lambda_earlier <- readRDS(Lambda_inits_path)
   Fit_species <- dimnames(tmsOcc_l$y)[[1]]
-  stopifnot(all(rownames(Lambda_earlier) %in% Fit_species), identical(head(Fit_species, 2), head(rownames(Lambda_earlier), 2)))
+  # Species of the earlier fit no longer in the data (below the detection cutoff after a data change) are dropped
+  if (!all(rownames(Lambda_earlier) %in% Fit_species)) cat("Loadings starting values: dropped", sum(!rownames(Lambda_earlier) %in% Fit_species), "species not in the data:", setdiff(rownames(Lambda_earlier), Fit_species), "\n")
+  Lambda_earlier <- Lambda_earlier[rownames(Lambda_earlier) %in% Fit_species, , drop = FALSE]
+  stopifnot(identical(head(Fit_species, 2), head(rownames(Lambda_earlier), 2)))
   Lambda <- matrix(0, length(Fit_species), N_factors, dimnames = list(Fit_species, NULL))
   Lambda[rownames(Lambda_earlier), seq_len(min(2, N_factors))] <- Lambda_earlier[, seq_len(min(2, N_factors))]
   Lambda[upper.tri(Lambda)] <- 0
